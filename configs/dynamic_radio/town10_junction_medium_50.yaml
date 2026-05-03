@@ -1,0 +1,103 @@
+dataset:
+  root: datasets/single_scene_medium_50_20260429
+  seed: 1701
+  split_seed: 7
+
+scene:
+  town: Town10HD_Opt
+  scene_mode: junction
+  scene_id: town10_junction_0189
+  support_size: 192.0
+  valid_size: 96.0
+  junction_core_radius: 12.0
+  static_dir: datasets/single_scene_tx_demo_v4_offline/scene_static
+  reference_export_dir: datasets/single_scene_tx_demo_v4_offline/reference_scene/sionna_export
+
+routes:
+  source_dir: datasets/single_scene_tx_demo_v6_pipeline_15/episodes/episode_000001
+  sample_step_m: 0.5
+  conflict_focus_radius_m: 28.0
+
+tx:
+  corridor_width_m: 10.0
+
+traffic:
+  duration_s: 8.0
+  fps: 10.0
+  traffic_preroll_s: 2.0
+  vehicle_count_range: [3, 6]
+  vehicle_count_mix: {3: 0.20, 4: 0.35, 5: 0.30, 6: 0.15}
+  primary_ignore_lights: true
+  context_ignore_lights: true
+  background_obey_lights: true
+  background_speed_diff: 0.0
+  max_large_vehicle_count: 1
+  estimated_speed_mps: 6.8
+
+plans:
+  num_plans: 250
+  seed: 1701
+  candidate_multiplier: 20
+  primary_count: 2
+  primary_controlled_count: 2
+  auxiliary_controlled_count: 1
+  auxiliary_controlled_required: false
+  background_tm_max_count: 4
+  background_spawn_region: support_region
+  background_min_distance_to_controlled_spawn_m: 6.0
+  background_max_distance_to_controlled_route_m: 45.0
+  background_speed_diff_jitter: [-10.0, 15.0]
+  target_event_window_s: [2.0, 6.0]
+  primary_start_delay_s: [0.0, 0.5, 1.0]
+  context_start_delay_s: [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0]
+  primary_speed_diff: [-35.0, -30.0, -25.0]
+  context_speed_diff: [-30.0, -25.0, -20.0]
+  max_extreme_collision_risk: 8.0
+  conflict_distance_m: 3.2
+  conflict_time_window_s: 1.5
+  min_spawn_start_separation_m: 1.0
+
+qa:
+  min_main_displacement_m: 12.0
+  lane_adherence_max_offset_m: 1.75
+  lane_adherence_max_consecutive_frames: 20
+  max_jump_per_frame_m: 3.5
+  idle_speed_threshold_mps: 0.5
+  max_idle_fraction: 0.70
+  max_all_slow_duration_s: 2.0
+  large_vehicle_token: fusorosa
+  max_large_vehicle_count: 1
+
+diagnostics:
+  tx_clearance_reference_m: 2.5
+
+carla:
+  python: python3
+  host: localhost
+  port: 2000
+  route_step: 2.0
+  route_approach: 25.0
+  route_exit: 25.0
+  min_approach: 18.0
+  min_exit: 18.0
+  vehicle_size_preset: mixed
+  num_background_vehicles: 0
+  clear_existing_vehicles: true
+  clear_existing_sensors: true
+  max_retries_per_plan: 3
+
+sionna:
+  python: /share1/fzj/miniconda3/envs/sionna019/bin/python
+  rf_policy: all_tx
+  resolution: 128
+  frequency_hz: 5.89e9
+  bandwidth_hz: 10e6
+  tx_power_dbm: 23.0
+  max_depth: 3
+  num_samples: 250000
+
+profile:
+  name: medium_50
+  target_accepted_episodes: 50
+  candidate_plan_count: 250
+  render_demo_video: false

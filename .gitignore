@@ -1,0 +1,60 @@
+# This workspace is a CARLA release tree with the active dataset pipeline
+# layered on top. Track the active project layer; keep generated datasets,
+# CARLA binaries/assets, logs, videos, caches, and temporary outputs out of Git.
+
+# Ignore everything by default.
+*
+
+# Active project and coordination docs.
+!/.gitignore
+!/AGENTS.md
+!/README
+!/CARLA_SIONNA_CODE_OVERVIEW_ZH.md
+
+!/.agent/
+!/.agent/HANDOFF.md
+!/.agent/PLANS.md
+!/.agent/DATASET_PIPELINE.md
+
+!/configs/
+!/configs/dynamic_radio/
+!/configs/dynamic_radio/**
+
+!/docs/
+!/docs/README.md
+!/docs/QA_AND_FAILURES.md
+!/docs/RUNTIME_ENVIRONMENT.md
+
+!/scripts/
+!/scripts/drd.py
+!/scripts/run_DynamicRadioMap_Town10_300.sh
+!/scripts/setup_umodel_toolchain.sh
+!/scripts/dynamic_radio_dataset/
+!/scripts/dynamic_radio_dataset/**
+
+# Generated/runtime artifacts, even under otherwise tracked directories.
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Generated datasets, temporary outputs, media, and logs.
+/datasets/
+/tmp/
+/videos/
+*.log
+
+# CARLA release assets and nested upstream repositories are intentionally left
+# untracked in this project repo.
+/CarlaUE4/
+/Engine/
+/Plugins/
+/PythonAPI/
+/Co-Simulation/
+/HDMaps/
+/Import/
+/Tools/

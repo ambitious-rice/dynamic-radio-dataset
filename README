@@ -1,0 +1,50 @@
+CARLA + Sionna Dynamic Radio Dataset
+====================================
+
+This workspace contains a CARLA 0.9.15 installation plus an active dataset
+pipeline for dynamic radio-map generation. The project code lives in:
+
+```text
+scripts/dynamic_radio_dataset/
+```
+
+The preferred CLI is:
+
+```bash
+python3 scripts/drd.py --help
+```
+
+Current formal pipeline:
+
+```text
+RouteLibrary -> TrafficPlan bank -> preflight -> CARLA collection
+  -> trajectory QA -> Sionna/RSS -> per-TX QA -> episode-TX index
+```
+
+The current baseline config is one Town10HD_Opt junction, three fixed TXs,
+8 seconds at 10 fps, 80 frames, 128x128 RSS, requested-total 3-6 vehicles, and
+all-TX RF processing. This is a baseline configuration, not a structural
+limitation.
+
+Useful commands:
+
+```bash
+python3 scripts/drd.py prepare-scene --config configs/dynamic_radio/town10_junction_smoke.yaml
+python3 scripts/drd.py build-route-library --config configs/dynamic_radio/town10_junction_smoke.yaml
+python3 scripts/drd.py generate-plans --config configs/dynamic_radio/town10_junction_smoke.yaml --num-plans 20
+python3 scripts/drd.py collect --config configs/dynamic_radio/town10_junction_smoke.yaml --max-attempts 3
+python3 scripts/drd.py process-rf --config configs/dynamic_radio/town10_junction_smoke.yaml --max-episodes 1
+python3 scripts/drd.py finalize --config configs/dynamic_radio/town10_junction_smoke.yaml
+```
+
+Static verification:
+
+```bash
+PYTHONPATH=scripts python3 -m py_compile $(find scripts/dynamic_radio_dataset -name "*.py")
+PYTHONPATH=scripts python3 -m dynamic_radio_dataset.checks.check_contract --repo-root .
+python3 scripts/drd.py --help
+```
+
+Agent handoff and current project context are in `.agent/`. The active
+documentation map is `docs/README.md`. Historical audits and old reports are
+under `docs/archive/` and should not be loaded by default.

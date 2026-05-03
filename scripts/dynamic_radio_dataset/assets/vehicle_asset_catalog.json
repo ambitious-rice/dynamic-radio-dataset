@@ -1,0 +1,88 @@
+{
+  "vehicle.audi.etron": {
+    "asset_relpath": "Carla/Static/Car/4Wheeled/AudiETron/SM_sc_Etron.uasset",
+    "game_tag": "ue4.26",
+    "asset_source": "carla_static_mesh",
+    "asset_yaw_offset_deg": 0.0,
+    "fallback_allowed": true
+  },
+  "vehicle.chevrolet.impala": {
+    "asset_relpath": "Carla/Static/Car/4Wheeled/Chevrolet/SM_sc_Chevrolet.uasset",
+    "game_tag": "ue4.26",
+    "asset_source": "carla_static_mesh",
+    "asset_yaw_offset_deg": 0.0,
+    "fallback_allowed": true
+  },
+  "vehicle.dodge.charger_2020": {
+    "asset_relpath": "Carla/Static/Car/4Wheeled/DodgeCharger2020/SM_sc_DodgeCharger.uasset",
+    "game_tag": "ue4.26",
+    "asset_source": "carla_static_mesh",
+    "asset_yaw_offset_deg": 0.0,
+    "fallback_allowed": true
+  },
+  "vehicle.ford.ambulance": {
+    "asset_relpath": "Carla/Static/Truck/Ambulance/SM_sc_Ambulance.uasset",
+    "game_tag": "ue4.26",
+    "asset_source": "carla_static_mesh",
+    "asset_yaw_offset_deg": 0.0,
+    "fallback_allowed": true
+  },
+  "vehicle.lincoln.mkz_2017": {
+    "asset_relpath": "Carla/Static/Car/4Wheeled/LincolnMKZ2017/SM_sc_Lincoln.uasset",
+    "game_tag": "ue4.26",
+    "asset_source": "carla_static_mesh",
+    "asset_yaw_offset_deg": 0.0,
+    "fallback_allowed": true
+  },
+  "vehicle.micro.microlino": {
+    "asset_relpath": "Carla/Static/Car/4Wheeled/BmwIsetta/SM_sc_Isetta.uasset",
+    "game_tag": "ue4.26",
+    "asset_source": "approximate_bmw_isetta",
+    "asset_yaw_offset_deg": 0.0,
+    "approximate_match": true,
+    "fallback_allowed": true,
+    "note": "Microlino falls back to the nearby BMW Isetta asset for top-down visualization."
+  },
+  "vehicle.mini.cooper_s": {
+    "asset_relpath": "Carla/Static/Car/4Wheeled/MIni/SM_sc_MiniCOoperS.uasset",
+    "game_tag": "ue4.26",
+    "asset_source": "carla_static_mesh",
+    "asset_yaw_offset_deg": 0.0,
+    "fallback_allowed": true
+  },
+  "vehicle.mitsubishi.fusorosa": {
+    "asset_relpath": "Carla/Static/Bus/Mitsubishi_FusoRosa/SM_SC_FusoRosa.uasset",
+    "game_tag": "ue4.26",
+    "asset_source": "carla_static_mesh",
+    "asset_yaw_offset_deg": 0.0,
+    "fallback_allowed": true
+  },
+  "vehicle.nissan.micra": {
+    "asset_relpath": "Carla/Static/Car/4Wheeled/Nissan_Micra/SM_sc_NissanMicra.uasset",
+    "game_tag": "ue4.26",
+    "asset_source": "carla_static_mesh",
+    "asset_yaw_offset_deg": 0.0,
+    "fallback_allowed": true
+  },
+  "vehicle.nissan.patrol": {
+    "asset_relpath": "Carla/Static/Car/4Wheeled/Nissan_Patrol/SM_sc_NissanPatrol.uasset",
+    "game_tag": "ue4.26",
+    "asset_source": "carla_static_mesh",
+    "asset_yaw_offset_deg": 0.0,
+    "fallback_allowed": true
+  },
+  "vehicle.seat.leon": {
+    "asset_relpath": "Carla/Static/Car/4Wheeled/Leon/Sm_sc_SeatLeon.uasset",
+    "game_tag": "ue4.26",
+    "asset_source": "carla_static_mesh",
+    "asset_yaw_offset_deg": 0.0,
+    "fallback_allowed": true
+  },
+  "vehicle.tesla.model3": {
+    "asset_relpath": "Carla/Static/Car/4Wheeled/Tesla/SM_sc_TeslaM3.uasset",
+    "game_tag": "ue4.26",
+    "asset_source": "carla_static_mesh",
+    "asset_yaw_offset_deg": 0.0,
+    "fallback_allowed": true
+  }
+}
