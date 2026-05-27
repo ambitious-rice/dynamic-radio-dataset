@@ -1,6 +1,75 @@
 # Project Handoff
 Last updated: 2026-05-26 CST
 
+## CARLA State GitHub Sync for RF Migration 2026-05-27 CST
+
+User wants the target server to reuse CARLA-side simulation results and rerun
+only the heavier Sionna/RF stages where possible. Added an explicit CARLA-state
+migration tool instead of copying the whole `datasets/` tree:
+
+```text
+new:
+  scripts/dynamic_radio_dataset/migration/__init__.py
+  scripts/dynamic_radio_dataset/migration/carla_state.py
+
+updated:
+  scripts/dynamic_radio_dataset/cli.py
+  docs/README_MIGRATION.md
+```
+
+New CLI commands:
+
+```bash
+PYTHONPATH=scripts python3 scripts/drd.py export-carla-state \
+  --config configs/dynamic_radio/multi_scene_20x150_resolved.yaml \
+  --output-dir carla_state/MultiScene20 \
+  --archive carla_state/MultiScene20.tar.gz \
+  --overwrite
+
+PYTHONPATH=scripts python3 scripts/drd.py import-carla-state \
+  --source carla_state/MultiScene20.tar.gz \
+  --destination-root .
+```
+
+The export whitelist includes accepted episode trajectories/plans/trajectory
+QA/TX assignments, `scene_static` TX catalogs and scene signatures, reference
+scene metadata, and by default the reference Sionna export used as static
+building proxy source. It excludes dynamic RSS, static RSS caches, per-TX
+`rss_maps.npz`, episode Sionna exports, RF process metadata, videos, logs, and
+other generated RF products.
+
+Dry-run size check on the current MultiScene20 state:
+
+```text
+command:
+  PYTHONPATH=scripts python3 scripts/drd.py export-carla-state \
+    --config configs/dynamic_radio/multi_scene_20x150_resolved.yaml \
+    --output-dir tmp/carla_state_multiscene20_dryrun \
+    --dry-run --overwrite
+
+result:
+  accepted episodes: 3000
+  whitelisted files: 33542
+  uncompressed size: 1706.155 MiB
+  manifest: tmp/carla_state_multiscene20_dryrun/carla_state_manifest.json
+```
+
+Conclusion: the state is reusable but not small enough to mix into the normal
+code branch. Use a separate GitHub data branch such as
+`carla-state-multiscene20`; if the archive exceeds GitHub's 100 MB per-file
+limit, split it with `split -b 90M` and reconstruct with `cat` on the target.
+`docs/README_MIGRATION.md` contains the exact commands.
+
+Validation passed after this change:
+
+```text
+PYTHONPATH=scripts python3 -m py_compile $(find scripts/dynamic_radio_dataset -name "*.py")
+PYTHONPATH=scripts python3 -m dynamic_radio_dataset.checks.check_contract --repo-root .
+python3 scripts/drd.py --help
+python3 scripts/drd.py export-carla-state --help
+python3 scripts/drd.py import-carla-state --help
+```
+
 ## Code-Only Migration Guidance 2026-05-27 CST
 
 User plans to migrate the current project code to another server and rerun

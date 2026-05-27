@@ -1,7 +1,8 @@
-# Code-Only Migration to a New Server
+# Migration to a New Server
 
 This project layer lives under a CARLA 0.9.15 tree. Migrate code through GitHub,
-but do not migrate generated datasets or runtime artifacts.
+and optionally migrate the small CARLA-side state needed to rerun Sionna/RF
+without recollecting trajectories.
 
 ## Push From Source Server
 
@@ -26,6 +27,91 @@ __pycache__/
 *.pyc
 large logs, videos, and review images
 ```
+
+## Optional CARLA State Sync
+
+If the new server should reuse existing CARLA trajectories and TX placement, do
+not copy the whole `datasets/` tree. Export the CARLA-only state instead:
+
+```bash
+cd /share1/fzj/carla
+PYTHONPATH=scripts python3 scripts/drd.py export-carla-state \
+  --config configs/dynamic_radio/multi_scene_20x150_resolved.yaml \
+  --output-dir carla_state/MultiScene20 \
+  --archive carla_state/MultiScene20.tar.gz \
+  --overwrite
+```
+
+This includes accepted episode trajectories, plans, trajectory QA, TX
+assignments, `scene_static` TX catalogs/signatures, reference-scene metadata,
+and the reference Sionna export used as the static building proxy source. It
+excludes dynamic RSS, static RSS cache, per-TX `rss_maps.npz`, generated videos,
+RF process metadata, and episode Sionna exports.
+
+For a size check without copying files:
+
+```bash
+PYTHONPATH=scripts python3 scripts/drd.py export-carla-state \
+  --config configs/dynamic_radio/multi_scene_20x150_resolved.yaml \
+  --output-dir tmp/carla_state_multiscene20_dryrun \
+  --dry-run --overwrite
+```
+
+On 2026-05-27, the current MultiScene20 CARLA state dry run reported:
+
+```text
+3000 accepted episodes
+33542 whitelisted files
+1706.155 MiB uncompressed
+```
+
+Because the uncompressed state is not tiny, prefer one of these GitHub flows:
+
+```bash
+# Option A: separate data branch with files, if GitHub repo size is acceptable.
+git switch --orphan carla-state-multiscene20
+git rm -rf . --ignore-unmatch
+git add -f carla_state/MultiScene20 carla_state/MultiScene20.tar.gz
+git commit -m "Add MultiScene20 CARLA state export"
+git push origin carla-state-multiscene20
+
+# Option B: split the archive if the .tar.gz is over GitHub's 100 MB file limit.
+split -b 90M carla_state/MultiScene20.tar.gz carla_state/MultiScene20.tar.gz.part-
+git add -f carla_state/MultiScene20.tar.gz.part-*
+git commit -m "Add split MultiScene20 CARLA state export"
+git push origin carla-state-multiscene20
+```
+
+On the target server, reconstruct or import the state after cloning the code:
+
+```bash
+# If the archive is not split:
+PYTHONPATH=scripts python3 scripts/drd.py import-carla-state \
+  --source carla_state/MultiScene20.tar.gz \
+  --destination-root .
+
+# If the archive was split:
+cat carla_state/MultiScene20.tar.gz.part-* > carla_state/MultiScene20.tar.gz
+PYTHONPATH=scripts python3 scripts/drd.py import-carla-state \
+  --source carla_state/MultiScene20.tar.gz \
+  --destination-root .
+```
+
+Then recompute RF on the target server:
+
+```bash
+export DRD_SIONNA_PYTHON=/path/to/miniconda3/envs/sionna-rt-2x/bin/python
+python3 scripts/drd.py prepare-rf-cache \
+  --config configs/dynamic_radio/multi_scene_20x150_resolved.yaml --force
+python3 scripts/drd.py process-multi-scene-rf \
+  --config configs/dynamic_radio/multi_scene_20x150_resolved.yaml \
+  --use-gpu --gpu-ids 0 --rf-workers 1
+```
+
+If you intentionally want the target server to rebuild static building proxies
+from CARLA instead of reusing the reference Sionna export, add
+`--no-reference-export` during export. In that mode, the target server must be
+able to run the scene preparation/export path before RF cache generation.
 
 If this workspace is not already connected to a GitHub remote, create a private
 GitHub repository first and add it:

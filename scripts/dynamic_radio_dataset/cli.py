@@ -50,10 +50,15 @@ def parse_args() -> argparse.Namespace:
         "assign-tx",
         "regenerate-tx-catalogs",
         "promote-tx-catalogs",
+        "export-carla-state",
+        "import-carla-state",
     ):
         sub = subparsers.add_parser(command)
-        sub.add_argument("--config", type=Path, required=True)
-        sub.add_argument("--profile", type=str, default=None)
+        if command != "import-carla-state":
+            sub.add_argument("--config", type=Path, required=True)
+            sub.add_argument("--profile", type=str, default=None)
+        else:
+            sub.add_argument("--profile", type=str, default=None)
         if command in {"verify-release", "prune-release"}:
             sub.add_argument("--expected-episodes", type=int, default=None)
         if command == "failure-report":
@@ -161,6 +166,17 @@ def parse_args() -> argparse.Namespace:
         if command == "promote-tx-catalogs":
             sub.add_argument("--source", type=str, default="candidate_lane_exclusion")
             sub.add_argument("--allow-active-collection", action="store_true")
+        if command == "export-carla-state":
+            sub.add_argument("--output-dir", type=Path, required=True)
+            sub.add_argument("--archive", type=Path, default=None)
+            sub.add_argument("--no-reference-export", action="store_true")
+            sub.add_argument("--include-unaccepted", action="store_true")
+            sub.add_argument("--dry-run", action="store_true")
+            sub.add_argument("--overwrite", action="store_true")
+        if command == "import-carla-state":
+            sub.add_argument("--source", type=Path, required=True)
+            sub.add_argument("--destination-root", type=Path, default=Path("."))
+            sub.add_argument("--overwrite", action="store_true")
     review = subparsers.add_parser("render-review")
     review.add_argument("--episode-dir", type=Path, required=True)
     review.add_argument("--output-dir", type=Path, required=True)
@@ -209,6 +225,22 @@ def main() -> int:
             result = _run_multi_scene_command(args)
         elif args.command in {"regenerate-tx-catalogs", "promote-tx-catalogs"}:
             result = _run_tx_catalog_command(args)
+        elif args.command == "export-carla-state":
+            from dynamic_radio_dataset.migration.carla_state import export_carla_state
+
+            result = export_carla_state(
+                args.config,
+                args.output_dir,
+                archive_path=args.archive,
+                include_reference_export=not args.no_reference_export,
+                accepted_only=not args.include_unaccepted,
+                dry_run=bool(args.dry_run),
+                overwrite=bool(args.overwrite),
+            )
+        elif args.command == "import-carla-state":
+            from dynamic_radio_dataset.migration.carla_state import import_carla_state
+
+            result = import_carla_state(args.source, args.destination_root, overwrite=bool(args.overwrite))
         elif args.command == "prepare-rf-cache" and _looks_multi_scene_config(args.config):
             from dynamic_radio_dataset.multi_scene.runner import prepare_multi_scene_rf_cache
 
