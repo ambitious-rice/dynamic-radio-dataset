@@ -65,7 +65,31 @@ On 2026-05-27, the current MultiScene20 CARLA state dry run reported:
 1706.155 MiB uncompressed
 ```
 
-Because the uncompressed state is not tiny, prefer one of these GitHub flows:
+The current CARLA state has already been uploaded to GitHub as a separate data
+branch:
+
+```text
+remote: origin
+branch: carla-state-multiscene20
+commit: ee82aeb7061cdc4a727ec41c99d92d48fc5b3498
+archive: carla_state/MultiScene20.tar.gz split into 3 parts
+archive sha256: f4614ad64c73dd37184cd1d53ecc62249cf98ed521535301a6d7b7d2d3abf595
+remote verification: fresh shallow clone + reassembled archive passed sha256
+```
+
+To retrieve it on the target server:
+
+```bash
+git clone --depth 1 --branch carla-state-multiscene20 \
+  git@github.com:ambitious-rice/dynamic-radio-dataset.git \
+  /tmp/dynamic-radio-carla-state
+cd /tmp/dynamic-radio-carla-state/carla_state
+cat MultiScene20.tar.gz.part-* > MultiScene20.tar.gz
+sha256sum -c MultiScene20.tar.gz.sha256
+```
+
+Because the uncompressed state is not tiny, use one of these GitHub flows when
+refreshing the uploaded state:
 
 ```bash
 # Option A: separate data branch with files, if GitHub repo size is acceptable.
@@ -144,7 +168,19 @@ conda env create -f envs/sionna-rt-2x.yaml
 export DRD_SIONNA_PYTHON=/path/to/miniconda3/envs/sionna-rt-2x/bin/python
 
 导入 CARLA-only state：
-如果拿到的是 carla_state/MultiScene20.tar.gz：
+优先从 GitHub 数据分支下载：
+git clone --depth 1 --branch carla-state-multiscene20 \
+  git@github.com:ambitious-rice/dynamic-radio-dataset.git \
+  /tmp/dynamic-radio-carla-state
+cd /tmp/dynamic-radio-carla-state/carla_state
+cat MultiScene20.tar.gz.part-* > MultiScene20.tar.gz
+sha256sum -c MultiScene20.tar.gz.sha256
+cd /path/to/carla
+PYTHONPATH=scripts python3 scripts/drd.py import-carla-state \
+  --source /tmp/dynamic-radio-carla-state/carla_state/MultiScene20.tar.gz \
+  --destination-root .
+
+如果用户手动传过来的是 carla_state/MultiScene20.tar.gz：
 PYTHONPATH=scripts python3 scripts/drd.py import-carla-state \
   --source carla_state/MultiScene20.tar.gz \
   --destination-root .

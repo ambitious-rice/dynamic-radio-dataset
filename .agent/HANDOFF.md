@@ -69,6 +69,24 @@ also states that old dynamic/static RF outputs must not be reused and that the
 fusorosa sealed-underbody geometry is applied when episode Sionna exports are
 regenerated.
 
+CARLA state upload completed on 2026-05-27 CST:
+
+```text
+data branch: carla-state-multiscene20
+commit: ee82aeb7061cdc4a727ec41c99d92d48fc5b3498
+files:
+  carla_state/MultiScene20.tar.gz.part-aa 90 MiB
+  carla_state/MultiScene20.tar.gz.part-ab 90 MiB
+  carla_state/MultiScene20.tar.gz.part-ac 52.69 MiB
+  carla_state/MultiScene20.tar.gz.sha256
+  carla_state/README_CARLA_STATE.md
+archive sha256:
+  f4614ad64c73dd37184cd1d53ecc62249cf98ed521535301a6d7b7d2d3abf595
+verification:
+  fresh shallow clone of branch carla-state-multiscene20 from GitHub,
+  reassembled parts with cat, sha256sum -c passed
+```
+
 Validation passed after this change:
 
 ```text
