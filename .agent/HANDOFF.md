@@ -7,6 +7,29 @@ User plans to migrate the current project code to another server and rerun
 collection/simulation there. Dataset artifacts, temporary experiments, archives,
 logs, and intermediate runtime records should not be migrated.
 
+Local Git migration commit is ready:
+
+```text
+branch: dynamic-radio-migration-sionna2
+commit: 2743738 Prepare dynamic radio migration with Sionna RT 2
+```
+
+GitHub SSH status on 2026-05-27:
+
+```text
+ssh -T -p 443 git@ssh.github.com
+  authenticated as ambitious-rice
+
+ssh -T git@github.com
+  port 22 connection closed by remote host
+```
+
+Use `ssh://git@ssh.github.com:443/<owner>/<repo>.git` as the remote URL if port
+22 remains blocked. Candidate repos checked
+`ambitious-rice/carla`, `ambitious-rice/dynamic-radio-dataset`, and
+`ambitious-rice/carla-sionna-dynamic-radio` did not exist. User still needs to
+provide/create an empty GitHub repo URL before push can proceed.
+
 Follow-up: user prefers GitHub-based migration over tar/rsync. Added migration
 environment files and a target-server checklist:
 
