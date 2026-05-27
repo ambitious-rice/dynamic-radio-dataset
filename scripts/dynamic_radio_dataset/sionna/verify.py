@@ -13,7 +13,7 @@ import shutil
 import subprocess
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence
+from typing import Dict, Iterable, List, Sequence
 
 
 def parse_args() -> argparse.Namespace:

@@ -1,0 +1,40 @@
+dataset:
+  name: DynamicRadioMap-MultiSceneEnd2EndSmoke
+  root: datasets/DynamicRadioMap/MultiSceneEnd2EndSmoke
+  seed: 1701
+  split_seed: 7
+  accepted_trajectories_per_scene: 5
+  tx_candidates_per_scene: 20
+  selected_tx_per_episode: 5
+
+base_single_scene_config: configs/dynamic_radio/town10_junction_smoke.yaml
+
+tx:
+  candidate_count: 20
+  selected_tx_per_episode: 5
+  placement_seed: 1701
+  assignment_seed: 1701
+  assignment_min_pairwise_distance_m: 6.0
+  placement:
+    min_distance_to_road_m: 2.0
+    max_distance_to_road_m: 8.0
+    min_pairwise_tx_distance_m: 8.0
+    max_distance_to_scene_center_m: 42.0
+    grid_step_m: 1.5
+
+scenes:
+  - candidate_id: town10_junction_0189_ready
+    scene_id: town10_junction_0189
+    town: Town10HD_Opt
+    scene_type: signalized_junction
+    selector: {mode: junction, junction_id: 189}
+    source_reference_scene: datasets/DynamicRadioMap/Town10/reference_scene
+    target_accepted: 5
+    single_scene_overrides:
+      plans:
+        num_plans: 40
+      traffic:
+        duration_s: 10.0
+        fps: 10.0
+      profile:
+        target_accepted_episodes: 5

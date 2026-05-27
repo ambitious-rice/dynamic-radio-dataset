@@ -1,0 +1,37 @@
+multi_scene_config: configs/dynamic_radio/multi_scene_20x150_resolved.yaml
+source_candidate_catalog: datasets/DynamicRadioMap/MultiScene20/discovery/scene_candidates.jsonl
+target_scene_count: 3
+target_accepted_per_scene: 150
+auto_manage_carla: true
+carla_gpu_id: 0
+max_carla_restarts: 8
+validation_order: manifest
+selected_candidate_ids:
+  - town01_opt_junction_0143
+  - town03_opt_junction_1696
+  - town05_opt_junction_0359
+backup_candidate_ids:
+  - town04_opt_junction_1197
+  - town02_opt_junction_0298
+  - town04_opt_junction_1103
+  - town04_opt_junction_1008
+  - town10_junction_0134
+  - town05_opt_junction_2240
+  - town05_opt_junction_2014
+  - town10_junction_0468
+  - town05_opt_junction_2328
+  - town04_opt_junction_0278
+scene_type_overrides:
+  town01_opt_junction_0143: simple_junction_runtime_replacement
+  town03_opt_junction_1696: simple_junction_runtime_replacement
+  town05_opt_junction_0359: simple_junction_runtime_replacement
+  town04_opt_junction_1197: simple_junction_runtime_replacement
+  town02_opt_junction_0298: simple_junction_runtime_replacement
+  town04_opt_junction_1103: simple_junction_runtime_replacement
+  town04_opt_junction_1008: simple_junction_runtime_replacement
+  town10_junction_0134: simple_junction_runtime_replacement
+  town05_opt_junction_2240: simple_junction_runtime_replacement
+  town05_opt_junction_2014: simple_junction_runtime_replacement
+  town10_junction_0468: simple_junction_runtime_replacement
+  town05_opt_junction_2328: simple_junction_runtime_replacement
+  town04_opt_junction_0278: simple_junction_runtime_replacement

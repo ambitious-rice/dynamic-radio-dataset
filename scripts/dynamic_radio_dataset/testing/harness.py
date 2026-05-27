@@ -10,7 +10,7 @@ import numpy as np
 from dynamic_radio_dataset.configs import load_config
 from dynamic_radio_dataset.json_utils import load_json
 from dynamic_radio_dataset.paths import dataset_root
-from dynamic_radio_dataset.rf.processing import expected_tx_ids, rf_episode_complete, trajectory_accepted_episode_dirs
+from dynamic_radio_dataset.rf.processing import expected_tx_count, expected_tx_ids, rf_episode_complete, trajectory_accepted_episode_dirs
 
 
 def assert_rf_scratch_outputs(
@@ -25,8 +25,9 @@ def assert_rf_scratch_outputs(
         raise RuntimeError(f"Expected {expected_episodes} trajectory-accepted episodes, found {len(episodes)}.")
 
     tx_ids = expected_tx_ids(config)
+    tx_count = expected_tx_count(config)
     expected_shape = (
-        len(tx_ids),
+        tx_count,
         int(round(float(config["traffic"]["duration_s"]) * float(config["traffic"]["fps"]))),
         int(config.get("sionna", {}).get("resolution", 128)),
         int(config.get("sionna", {}).get("resolution", 128)),
@@ -92,4 +93,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

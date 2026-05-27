@@ -23,38 +23,26 @@ from typing import Dict, List, Optional, Sequence
 
 import numpy as np
 
-from dynamic_radio_dataset.radio_dataset_utils import (
-    TxSearchConfig,
-    deterministic_split,
-    ensure_dir,
-    load_carla_map_for_scene,
-    load_json,
-    plot_tx_selection_overlay,
-    rasterize_building_mask,
-    save_json,
-    scene_signature,
-    select_tx_candidates,
-    summarize_episode_for_index,
-    write_jsonl,
-)
+from dynamic_radio_dataset.geometry.regions import scene_signature
+from dynamic_radio_dataset.indexing.finalize import finalize_index
+from dynamic_radio_dataset.json_utils import load_json, save_json
+from dynamic_radio_dataset.raster.traffic_grid import rasterize_building_mask
 from dynamic_radio_dataset.rf.episode_job import process_episode
 from dynamic_radio_dataset.rf.runtime import DEFAULT_SIONNA_PYTHON, manual_sionna_env, run_command as runtime_run_command
+from dynamic_radio_dataset.rf.scene_static import (
+    TxSearchConfig,
+    load_carla_map_for_scene,
+    plot_tx_selection_overlay,
+    select_tx_candidates,
+)
+
+
+def ensure_dir(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 ASSETS_DIR = PACKAGE_ROOT / "assets"
-DEFAULT_VEHICLE_ALLOWLIST = ",".join(
-    [
-        "vehicle.mini.cooper_s",
-        "vehicle.nissan.micra",
-        "vehicle.tesla.model3",
-        "vehicle.chevrolet.impala",
-        "vehicle.seat.leon",
-        "vehicle.mitsubishi.fusorosa",
-    ]
-)
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build a formal single-scene CARLA + Sionna radio dataset.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -77,28 +65,6 @@ def parse_args() -> argparse.Namespace:
     process.add_argument("--episode-id", type=str, default=None)
     process.add_argument("--scene-static-dir", type=Path, default=None)
     process.add_argument("--reference-export-dir", type=Path, default=None)
-
-    collect = subparsers.add_parser("collect-dataset", help="Deprecated random collector; use scripts/drd.py collect.")
-    add_common_paths_args(collect)
-    add_export_args(collect)
-    add_rss_args(collect)
-    add_episode_qa_args(collect)
-    add_collect_args(collect)
-    collect.add_argument("--scene-static-dir", type=Path, default=None)
-    collect.add_argument("--reference-export-dir", type=Path, default=None)
-    collect.add_argument("--start-episode-index", type=int, default=0)
-    collect.add_argument("--raw-episode-budget", type=int, default=150)
-    collect.add_argument("--target-accepted-episodes", type=int, default=120)
-    collect.add_argument("--accepted-ratio-stop-threshold", type=float, default=0.0)
-    collect.add_argument(
-        "--per-tx-target-count",
-        type=int,
-        default=0,
-        help=(
-            "If >0, keep collecting until each fixed TX has this many uniquely assigned accepted episodes. "
-            "Each episode is assigned to at most one TX."
-        ),
-    )
 
     finalize = subparsers.add_parser("finalize-index", help="Regenerate episode_index.jsonl and splits.json from processed episodes.")
     finalize.add_argument("--dataset-root", type=Path, required=True)
@@ -171,34 +137,6 @@ def add_episode_qa_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--large-vehicle-token", type=str, default="fusorosa")
     parser.add_argument("--max-large-vehicle-count", type=int, default=1)
     parser.add_argument("--corridor-width-m", type=float, default=10.0)
-
-
-def add_collect_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--town", type=str, default="Town10HD_Opt")
-    parser.add_argument("--host", type=str, default="localhost")
-    parser.add_argument("--port", type=int, default=2000)
-    parser.add_argument("--scene-mode", choices=["junction", "corridor"], default="junction")
-    parser.add_argument("--seed", type=int, default=7)
-    parser.add_argument("--support-size", type=float, default=192.0)
-    parser.add_argument("--valid-size", type=float, default=96.0)
-    parser.add_argument("--route-step", type=float, default=2.0)
-    parser.add_argument("--route-approach", type=float, default=55.0)
-    parser.add_argument("--route-exit", type=float, default=55.0)
-    parser.add_argument("--min-approach", type=float, default=18.0)
-    parser.add_argument("--min-exit", type=float, default=18.0)
-    parser.add_argument("--junction-core-radius", type=float, default=12.0)
-    parser.add_argument("--episode-duration-s", type=float, default=8.0)
-    parser.add_argument("--fps", type=float, default=10.0)
-    parser.add_argument("--traffic-preroll-s", type=float, default=2.0)
-    parser.add_argument("--vehicle-allowlist", type=str, default=DEFAULT_VEHICLE_ALLOWLIST)
-    parser.add_argument("--vehicle-size-preset", choices=["mixed", "passenger"], default="mixed")
-    parser.add_argument("--min-passed-targets", type=int, default=2)
-    parser.add_argument("--num-background-vehicles", type=int, default=0)
-    parser.add_argument("--turn-ratio", type=float, default=0.3, help="Probability of collecting 4 vehicles instead of 3.")
-    parser.add_argument("--target-speed-diff", type=float, default=-20.0)
-    parser.add_argument("--background-speed-diff", type=float, default=0.0)
-    parser.add_argument("--clear-existing-vehicles", action="store_true", default=True)
-    parser.add_argument("--clear-existing-sensors", action="store_true", default=True)
 
 
 def tx_search_config_from_args(args: argparse.Namespace) -> TxSearchConfig:
@@ -298,7 +236,7 @@ def run_static_baseline_for_tx(
     cmd: List[object] = [
         args.sionna_python,
         "-m",
-        "dynamic_radio_dataset.render.rss_video",
+        "dynamic_radio_dataset.rf.rss_compute",
         "--export-dir",
         export_dir,
         "--output-dir",
@@ -338,7 +276,6 @@ def run_static_baseline_for_tx(
         "--allow-zero-vehicles",
         "--allow-flat-rss",
         "--no-auto-skip-unstable-start",
-        "--skip-frame-rendering",
     ]
     cmd.extend(["--mitsuba-variant", str(args.mitsuba_variant)])
     if bool(args.use_gpu):
@@ -458,38 +395,6 @@ def prepare_scene(args: argparse.Namespace) -> int:
     return 0
 
 
-def finalize_index(dataset_root: Path, split_seed: int) -> int:
-    episodes_dir = dataset_root / "episodes"
-    rows = []
-    accepted_episode_ids = []
-    for episode_dir in sorted(episodes_dir.glob("episode_*")):
-        qa_path = episode_dir / "qa_report.json"
-        meta_path = episode_dir / "episode_meta.json"
-        if not qa_path.exists() or not meta_path.exists():
-            continue
-        qa_report = load_json(qa_path)
-        episode_meta = load_json(meta_path)
-        tx_reports = qa_report.get("tx_reports", [])
-        frame_count = int(episode_meta.get("frame_count", 0))
-        episode_rows = summarize_episode_for_index(episode_dir.name, episode_meta, qa_report["scene_qa"], tx_reports, frame_count)
-        rows.extend(row for row in episode_rows if bool(row.get("accepted")))
-        if qa_report.get("accepted_tx_ids"):
-            accepted_episode_ids.append(episode_dir.name)
-    write_jsonl(dataset_root / "episode_index.jsonl", rows)
-    save_json(dataset_root / "splits.json", deterministic_split(sorted(set(accepted_episode_ids)), seed=split_seed))
-    print(f"[OK] Wrote dataset index: {dataset_root / 'episode_index.jsonl'}")
-    print(f"[OK] Wrote splits: {dataset_root / 'splits.json'}")
-    return 0
-
-
-def collect_dataset(args: argparse.Namespace) -> int:
-    raise RuntimeError(
-        "collect-dataset is deprecated for formal runs. "
-        "Use python3 scripts/drd.py collect with a generated plan_catalog instead. "
-        "prepare-scene, process-episode, and finalize-index remain supported here."
-    )
-
-
 def main() -> int:
     args = parse_args()
     args.dataset_root = args.dataset_root.resolve()
@@ -498,8 +403,6 @@ def main() -> int:
         return prepare_scene(args)
     if args.command == "process-episode":
         return process_episode(args)
-    if args.command == "collect-dataset":
-        return collect_dataset(args)
     if args.command == "finalize-index":
         return finalize_index(args.dataset_root.resolve(), split_seed=int(args.split_seed))
     raise ValueError(f"Unsupported command: {args.command}")

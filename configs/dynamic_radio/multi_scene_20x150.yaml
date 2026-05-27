@@ -1,0 +1,53 @@
+dataset:
+  name: DynamicRadioMap-MultiScene20
+  root: datasets/DynamicRadioMap/MultiScene20
+  seed: 1701
+  split_seed: 7
+  accepted_trajectories_per_scene: 150
+  tx_candidates_per_scene: 40
+  selected_tx_per_episode: 5
+  episode_duration_s: 10
+  fps: 10
+  rss_grid: [128, 128]
+
+base_single_scene_config: configs/dynamic_radio/dynamic_radiomap_town10_300.yaml
+
+discovery:
+  towns: [Town01_Opt, Town02_Opt, Town03_Opt, Town04_Opt, Town05_Opt, Town10HD_Opt]
+  scene_modes: [junction, corridor]
+  max_candidates: 160
+  candidate_catalog: discovery/scene_candidates.jsonl
+  carla:
+    python: /share1/fzj/miniconda3/envs/carla0915/bin/python
+    host: localhost
+    port: 2000
+    timeout_s: 30.0
+  scene:
+    support_size: 192.0
+    valid_size: 96.0
+    route_step: 2.0
+    route_approach: 25.0
+    route_exit: 25.0
+    min_approach: 18.0
+    min_exit: 18.0
+    junction_core_radius: 12.0
+  preview:
+    image_size: 512
+    contact_sheet_columns: 5
+    output_dir: discovery/previews
+
+tx:
+  candidate_count: 40
+  selected_tx_per_episode: 5
+  placement_seed: 1701
+  assignment_seed: 1701
+  assignment_min_pairwise_distance_m: 6.0
+  placement:
+    min_distance_to_road_m: 2.0
+    max_distance_to_road_m: 10.0
+    min_pairwise_tx_distance_m: 8.0
+    max_distance_to_scene_center_m: 48.0
+    grid_step_m: 1.5
+
+# Fill this list from validated selected_scene_manifest output.
+scenes: []

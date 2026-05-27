@@ -1,0 +1,47 @@
+dataset:
+  name: DynamicRadioMap-MultiSceneDiscoverySmoke
+  root: datasets/DynamicRadioMap/MultiSceneDiscoverySmoke
+  seed: 1701
+  split_seed: 7
+  accepted_trajectories_per_scene: 0
+  tx_candidates_per_scene: 20
+  selected_tx_per_episode: 5
+
+base_single_scene_config: configs/dynamic_radio/town10_junction_smoke.yaml
+
+discovery:
+  towns: [Town10HD_Opt]
+  scene_modes: [junction, corridor]
+  max_candidates: 24
+  candidate_catalog: discovery/scene_candidates.jsonl
+  carla:
+    python: /share1/fzj/miniconda3/envs/carla0915/bin/python
+    host: localhost
+    port: 2000
+    timeout_s: 30.0
+  scene:
+    support_size: 192.0
+    valid_size: 96.0
+    route_step: 2.0
+    route_approach: 25.0
+    route_exit: 25.0
+    min_approach: 18.0
+    min_exit: 18.0
+    junction_core_radius: 12.0
+  preview:
+    image_size: 512
+    contact_sheet_columns: 4
+    output_dir: discovery/previews
+
+tx:
+  candidate_count: 20
+  selected_tx_per_episode: 5
+  placement_seed: 1701
+  placement:
+    min_distance_to_road_m: 2.0
+    max_distance_to_road_m: 8.0
+    min_pairwise_tx_distance_m: 8.0
+    max_distance_to_scene_center_m: 42.0
+    grid_step_m: 1.5
+
+scenes: []

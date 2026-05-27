@@ -1,0 +1,68 @@
+schema: selected_scene_manifest_v1
+multi_scene_config: configs/dynamic_radio/multi_scene_20x150.yaml
+source_candidate_catalog: datasets/DynamicRadioMap/MultiScene20/discovery/scene_candidates.jsonl
+target_scene_count: 20
+target_accepted_per_scene: 150
+selection_policy: visual_contact_sheet_plus_program_validation
+validation_order: grouped_by_town
+auto_manage_carla: true
+max_carla_restarts: 8
+selected_candidate_ids:
+  - town05_opt_junction_0053
+  - town10_junction_0189
+  - town03_opt_junction_0238
+  - town04_opt_junction_0148
+  - town05_opt_junction_2086
+  - town03_opt_junction_0861
+  - town10_junction_0719
+  - town10_junction_0532
+  - town03_opt_junction_1352
+  - town01_opt_junction_0110
+  - town02_opt_junction_0076
+  - town04_opt_junction_1368
+  - town03_opt_junction_1191
+  - town04_opt_junction_1061
+  - town10_junction_0895
+  - town03_opt_junction_1932
+  - town04_opt_corridor_0425
+  - town05_opt_corridor_0266
+  - town10_corridor_0147
+  - town05_opt_junction_1722
+backup_candidate_ids:
+  - town05_opt_junction_0562
+  - town05_opt_junction_0396
+  - town04_opt_junction_0916
+  - town04_opt_junction_0785
+  - town10_junction_0023
+  - town03_opt_junction_0082
+  - town05_opt_junction_1882
+  - town03_opt_junction_1038
+  - town04_opt_junction_1593
+  - town04_opt_junction_1176
+  - town05_opt_corridor_0109
+  - town01_opt_corridor_0105
+  - town04_opt_junction_0483
+  - town04_opt_corridor_0187
+  - town10_corridor_0195
+scene_type_overrides:
+  town05_opt_junction_0053: multi_lane_junction
+  town10_junction_0189: signalized_junction
+  town03_opt_junction_0238: multi_lane_junction
+  town04_opt_junction_0148: multi_lane_junction
+  town05_opt_junction_2086: asymmetric_junction
+  town03_opt_junction_0861: asymmetric_junction
+  town10_junction_0719: asymmetric_junction
+  town10_junction_0532: asymmetric_junction
+  town03_opt_junction_1352: asymmetric_junction
+  town01_opt_junction_0110: simple_junction
+  town02_opt_junction_0076: simple_junction
+  town04_opt_junction_1368: asymmetric_junction
+  town03_opt_junction_1191: straight_through_junction
+  town04_opt_junction_1061: straight_through_junction
+  town10_junction_0895: t_junction_or_merge_like
+  town03_opt_junction_1932: t_junction_or_merge_like
+  town04_opt_corridor_0425: corridor
+  town05_opt_corridor_0266: corridor
+  town10_corridor_0147: corridor
+  town05_opt_junction_1722: multi_lane_junction_extended_backup
+  town04_opt_junction_0483: multi_lane_junction_extended_backup

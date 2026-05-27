@@ -7,21 +7,21 @@ from typing import Dict, List, Optional, Sequence
 
 import numpy as np
 
-from dynamic_radio_dataset.radio_dataset_utils import (
+from dynamic_radio_dataset.geometry.regions import scene_signature, scene_signature_matches
+from dynamic_radio_dataset.json_utils import load_json, save_json
+from dynamic_radio_dataset.qa.rf_policy import (
     EpisodeQAConfig,
     TxQAConfig,
-    build_traffic_grid_from_motion,
-    ensure_dir,
     evaluate_episode_scene_qa,
     evaluate_episode_tx_qa,
-    load_frame_indices_from_rss,
-    load_json,
-    load_motion_rows_by_frame,
-    save_json,
-    scene_signature,
-    scene_signature_matches,
 )
+from dynamic_radio_dataset.raster.traffic_grid import build_traffic_grid_from_motion
+from dynamic_radio_dataset.rf.artifacts import load_frame_indices_from_rss, load_motion_rows_by_frame
 from dynamic_radio_dataset.rf.runtime import manual_sionna_env, run_command as runtime_run_command
+
+
+def ensure_dir(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
 
 
 def episode_qa_config_from_args(args: argparse.Namespace) -> EpisodeQAConfig:
@@ -125,7 +125,7 @@ def run_dynamic_rss_for_tx(
     cmd: List[object] = [
         args.sionna_python,
         "-m",
-        "dynamic_radio_dataset.render.rss_video",
+        "dynamic_radio_dataset.rf.rss_compute",
         "--export-dir",
         export_dir,
         "--output-dir",
@@ -162,10 +162,7 @@ def run_dynamic_rss_for_tx(
         int(args.num_samples),
         "--num-runs",
         int(args.num_runs),
-        "--skip-frame-rendering",
         "--allow-flat-rss",
-        "--plot-style",
-        "clean",
         "--no-auto-skip-unstable-start",
     ]
     cmd.extend(["--mitsuba-variant", str(args.mitsuba_variant)])
@@ -177,21 +174,21 @@ def run_dynamic_rss_for_tx(
     return output_dir / "rss_maps.npz"
 
 
-def load_tx_catalog(static_dir: Path) -> Dict[str, object]:
-    return load_json(static_dir / "tx_catalog.json")
-
-
 def process_episode(args: argparse.Namespace) -> int:
     static_dir = scene_static_dir(args)
-    tx_selection = load_tx_catalog(static_dir)
+    episode_dir = args.episode_dir
+    episode_id = args.episode_id or episode_dir.name
+    from dynamic_radio_dataset.tx.assignment import selected_tx_catalog
+
+    tx_selection = selected_tx_catalog(static_dir, episode_dir)
     reference_export_dir = resolve_reference_export_dir(args, static_dir)
     if reference_export_dir is None:
         raise RuntimeError("Reference export dir could not be resolved. Run prepare-scene first or pass --reference-export-dir.")
 
-    episode_dir = args.episode_dir
-    episode_id = args.episode_id or episode_dir.name
     export_dir = episode_dir / "sionna_export"
-    if not export_dir.exists():
+    if not _episode_export_ready(export_dir):
+        if export_dir.exists():
+            shutil.rmtree(export_dir)
         export_dataset_dir(args, dataset_dir=episode_dir, export_dir=export_dir, reuse_building_proxy_from_export=reference_export_dir)
 
     scene_meta = load_json(episode_dir / "scene_meta.json")
@@ -261,12 +258,14 @@ def process_episode(args: argparse.Namespace) -> int:
         dynamic_rss_dbm=rss_dynamic.astype(np.float32),
         frame_indices=np.asarray(first_frame_indices, dtype=np.int32),
         tx_ids=np.asarray([tx["tx_id"] for tx in tx_selection["tx_catalog"]]),
+        tx_candidate_ids=np.asarray([tx.get("tx_candidate_id", tx["tx_id"]) for tx in tx_selection["tx_catalog"]]),
     )
     np.savez_compressed(
         episode_dir / "rss_delta_from_static_db.npz",
         delta_from_static_db=rss_delta.astype(np.float32),
         frame_indices=np.asarray(first_frame_indices, dtype=np.int32),
         tx_ids=np.asarray([tx["tx_id"] for tx in tx_selection["tx_catalog"]]),
+        tx_candidate_ids=np.asarray([tx.get("tx_candidate_id", tx["tx_id"]) for tx in tx_selection["tx_catalog"]]),
     )
 
     qa_scene = evaluate_episode_scene_qa(
@@ -297,6 +296,7 @@ def process_episode(args: argparse.Namespace) -> int:
         trajectory_qa = load_json(episode_dir / "trajectory_qa.json")
         vehicle_role_counts = dict(trajectory_qa.get("vehicle_role_counts", {})) if isinstance(trajectory_qa.get("vehicle_role_counts"), dict) else {}
     sampler_feedback = {}
+    plan_meta = load_json(episode_dir / "plan.json") if (episode_dir / "plan.json").exists() else {}
     if (episode_dir / "demo_scenario.json").exists():
         scenario_meta = load_json(episode_dir / "demo_scenario.json")
         sampler_feedback = {
@@ -319,6 +319,7 @@ def process_episode(args: argparse.Namespace) -> int:
             "vehicle_building_count": int(len(qa_scene.get("building_collision", {}).get("violations", []))),
         },
         "sampler_feedback": sampler_feedback,
+        "selected_tx_assignment": tx_selection.get("selected_tx_assignment"),
         "scene_qc_pass": bool(qa_scene["scene_qc_pass"]),
         "accepted_tx_ids": accepted_tx_ids if qa_scene["scene_qc_pass"] else [],
         "scene_qa": qa_scene,
@@ -337,13 +338,18 @@ def process_episode(args: argparse.Namespace) -> int:
         "episode_id": episode_id,
         "source_episode_dir": str(episode_dir),
         "town": scene_meta.get("town"),
+        "scene_id": plan_meta.get("scene_id") or scene_meta.get("scene_id") or actual_signature.get("scene_info", {}).get("scene_id"),
         "scene_mode": scene_meta.get("scene_mode"),
+        "scene_type": plan_meta.get("scene_type") or scene_meta.get("scene_type"),
         "fps": float(scene_meta["fps"]),
         "label_fps": float(args.label_fps),
         "label_stride": max(1, int(round(float(scene_meta["fps"]) / float(args.label_fps)))),
         "frame_count": int(len(first_frame_indices)),
         "frame_indices": first_frame_indices,
         "tx_ids": [tx["tx_id"] for tx in tx_selection["tx_catalog"]],
+        "tx_candidate_ids": [tx.get("tx_candidate_id", tx["tx_id"]) for tx in tx_selection["tx_catalog"]],
+        "selected_tx_assignment": tx_selection.get("selected_tx_assignment"),
+        "source_tx_catalog_count": tx_selection.get("source_tx_catalog_count", len(tx_selection["tx_catalog"])),
         "accepted_tx_ids": qa_report["accepted_tx_ids"],
         "scene_qc_pass": bool(qa_scene["scene_qc_pass"]),
         "vehicle_role_counts": vehicle_role_counts,
@@ -366,3 +372,19 @@ def process_episode(args: argparse.Namespace) -> int:
     )
     return 0
 
+
+def _episode_export_ready(export_dir: Path) -> bool:
+    required = [export_dir / "manifest.json", export_dir / "scene.xml", export_dir / "motion.jsonl"]
+    if not all(path.exists() and path.stat().st_size > 0 for path in required):
+        return False
+    try:
+        manifest = load_json(export_dir / "manifest.json")
+    except Exception:  # noqa: BLE001
+        return False
+    if "valid_crop" not in manifest or "support_region" not in manifest:
+        return False
+    try:
+        with (export_dir / "motion.jsonl").open("r", encoding="utf-8") as f:
+            return any(line.strip() for line in f)
+    except OSError:
+        return False

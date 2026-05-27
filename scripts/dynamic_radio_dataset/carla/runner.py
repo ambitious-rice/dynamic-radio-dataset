@@ -160,8 +160,44 @@ def collect_from_plan_catalog(
                 _materialize_episode(attempt_dir, episode_dir, episode_id)
                 accepted += 1
                 completed_plan_ids.add(plan.plan_id)
+                if _stop_on_carla_infrastructure_failure(config, result):
+                    summary = _collection_summary(
+                        config=config,
+                        dirs=dirs,
+                        attempted=attempted,
+                        accepted=accepted,
+                        skipped_completed=skipped_completed,
+                        existing_accepted=existing_accepted,
+                        target_accepted=target_accepted_count,
+                        attempt_budget=attempt_budget,
+                        plan_catalog_count=len(plans),
+                        resume=resume,
+                        stopped_reason="carla_post_clip_infrastructure_failure",
+                        server_check=_result_server_check(result),
+                    )
+                    summary["carla_infrastructure_failure"] = _carla_infrastructure_failure_row(result)
+                    _write_collection_summary(dirs["root"], summary)
+                    return summary
                 break
             _archive_failed_attempt(config, attempt_dir, result)
+            if _stop_on_carla_infrastructure_failure(config, result):
+                summary = _collection_summary(
+                    config=config,
+                    dirs=dirs,
+                    attempted=attempted,
+                    accepted=accepted,
+                    skipped_completed=skipped_completed,
+                    existing_accepted=existing_accepted,
+                    target_accepted=target_accepted_count,
+                    attempt_budget=attempt_budget,
+                    plan_catalog_count=len(plans),
+                    resume=resume,
+                    stopped_reason="carla_attempt_infrastructure_failure",
+                    server_check=_result_server_check(result),
+                )
+                summary["carla_infrastructure_failure"] = _carla_infrastructure_failure_row(result)
+                _write_collection_summary(dirs["root"], summary)
+                return summary
     if target_reached():
         stopped_reason = "target_accepted_reached"
     elif attempted >= attempt_budget:
@@ -514,16 +550,38 @@ def collect_attempt(
         return meta
     cmd = build_collect_command(config, plan, attempt_dir, seed_offset=plan_index * 100 + retry_index)
     started = time.time()
+    timeout_raw = config.get("carla", {}).get("collect_subprocess_timeout_s")
+    timeout_s = float(timeout_raw) if timeout_raw not in (None, "") else None
     with (attempt_dir / "carla_stdout.log").open("w", encoding="utf-8") as stdout_f, (
         attempt_dir / "carla_stderr.log"
     ).open("w", encoding="utf-8") as stderr_f:
-        proc = subprocess.run(
-            [str(item) for item in cmd],
-            cwd=str(repo_root()),
-            stdout=stdout_f,
-            stderr=stderr_f,
-            env=_with_package_path(),
-        )
+        try:
+            proc = subprocess.run(
+                [str(item) for item in cmd],
+                cwd=str(repo_root()),
+                stdout=stdout_f,
+                stderr=stderr_f,
+                env=_with_package_path(),
+                timeout=timeout_s,
+            )
+        except subprocess.TimeoutExpired:
+            meta = {
+                "schema": "carla_attempt_meta_v1",
+                "plan_id": plan.plan_id,
+                "target_tx_id": plan.target_tx_id,
+                "plan_bucket": _plan_bucket_meta(plan),
+                "attempt_dir": str(attempt_dir),
+                "retry_index": int(retry_index),
+                "command": [str(item) for item in cmd],
+                "returncode": None,
+                "elapsed_s": float(time.time() - started),
+                "status": "CARLA_FAILED",
+                "failure_code": "carla_collect_subprocess_timeout",
+                "timeout_s": timeout_s,
+                "server_check_after_failure": check_carla_server(config),
+            }
+            save_json(attempt_dir / "attempt_meta.json", meta)
+            return meta
     meta = {
         "schema": "carla_attempt_meta_v1",
         "plan_id": plan.plan_id,
@@ -586,6 +644,10 @@ def build_collect_command(config: dict, plan: TrafficPlan, attempt_dir: Path, se
         scene.get("town", "Town10HD_Opt"),
         "--scene-mode",
         scene.get("scene_mode", "junction"),
+        "--scene-id",
+        scene.get("scene_id", ""),
+        "--scene-type",
+        scene.get("scene_type", ""),
         "--seed",
         int(config.get("dataset", {}).get("seed", 7)) + int(seed_offset),
         "--frames",
@@ -631,10 +693,19 @@ def build_collect_command(config: dict, plan: TrafficPlan, attempt_dir: Path, se
         "--keep-existing",
         "--no-video",
     ]
+    selector = scene.get("selector", {}) if isinstance(scene.get("selector"), dict) else {}
+    if carla_cfg.get("traffic_manager_port") is not None:
+        cmd.extend(["--traffic-manager-port", int(carla_cfg["traffic_manager_port"])])
+    if selector.get("junction_id") is not None:
+        cmd.extend(["--scene-junction-id", int(selector["junction_id"])])
+    if selector.get("corridor_index") is not None:
+        cmd.extend(["--scene-corridor-index", int(selector["corridor_index"])])
     if bool(carla_cfg.get("clear_existing_vehicles", True)):
         cmd.append("--clear-existing-vehicles")
     if bool(carla_cfg.get("clear_existing_sensors", True)):
         cmd.append("--clear-existing-sensors")
+    if bool(carla_cfg.get("no_rendering_mode", False)):
+        cmd.append("--no-rendering-mode")
     return cmd
 
 
@@ -760,9 +831,50 @@ def _classify_carla_failure(attempt_dir: Path, config: dict) -> str:
         if "load_world" in text:
             return "carla_load_world_timeout"
         return "carla_rpc_timeout"
+    if "bind error" in text or "failed to create because of bind error" in text:
+        return "carla_traffic_manager_bind_error"
     if "segmentation fault" in text or "signal 11" in text:
         return "carla_server_segfault"
     return "carla_subprocess_failed"
+
+
+def _stop_on_carla_infrastructure_failure(config: Mapping[str, Any], result: Mapping[str, Any]) -> bool:
+    carla_cfg = config.get("carla", {}) if isinstance(config.get("carla"), Mapping) else {}
+    return bool(carla_cfg.get("stop_on_collect_infra_failure", False)) and _is_carla_infrastructure_failure(result)
+
+
+def _is_carla_infrastructure_failure(result: Mapping[str, Any]) -> bool:
+    codes = {
+        "carla_server_unavailable",
+        "carla_collect_subprocess_timeout",
+        "carla_server_unavailable_after_attempt",
+        "carla_rpc_unavailable_after_attempt",
+        "carla_load_world_timeout",
+        "carla_rpc_timeout",
+        "carla_server_segfault",
+        "carla_traffic_manager_bind_error",
+        "carla_subprocess_failed",
+    }
+    failure_code = str(result.get("failure_code") or "")
+    post_clip_code = str(result.get("post_clip_carla_failure_code") or "")
+    return failure_code in codes or post_clip_code in codes
+
+
+def _result_server_check(result: Mapping[str, Any]) -> dict | None:
+    value = result.get("server_check_after_failure") or result.get("server_check")
+    return value if isinstance(value, dict) else None
+
+
+def _carla_infrastructure_failure_row(result: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "status": result.get("status"),
+        "failure_code": result.get("failure_code"),
+        "post_clip_carla_failure_code": result.get("post_clip_carla_failure_code"),
+        "returncode": result.get("returncode"),
+        "elapsed_s": result.get("elapsed_s"),
+        "attempt_dir": result.get("attempt_dir"),
+        "server_check_after_failure": result.get("server_check_after_failure"),
+    }
 
 
 def _has_complete_clip_outputs(attempt_dir: Path, config: dict) -> bool:

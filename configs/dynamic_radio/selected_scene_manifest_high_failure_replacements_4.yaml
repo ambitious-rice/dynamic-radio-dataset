@@ -1,0 +1,39 @@
+schema: selected_scene_manifest_v1
+multi_scene_config: configs/dynamic_radio/multi_scene_20x150.yaml
+source_candidate_catalog: datasets/DynamicRadioMap/MultiScene20/discovery/scene_candidates.jsonl
+target_scene_count: 4
+target_accepted_per_scene: 150
+selection_policy: runtime_high_failure_replacement_after_observed_acceptance_rate_below_5_percent
+auto_manage_carla: false
+validation_order: manifest
+selected_candidate_ids:
+  - town05_opt_junction_0207
+  - town05_opt_junction_0979
+  - town04_opt_junction_0053
+  - town10_junction_0664
+backup_candidate_ids:
+  - town10_junction_0468
+  - town04_opt_junction_1159
+  - town05_opt_junction_0838
+  - town05_opt_junction_1292
+  - town05_opt_junction_1427
+  - town05_opt_junction_1574
+  - town05_opt_junction_1126
+  - town05_opt_junction_2014
+  - town05_opt_junction_2240
+  - town05_opt_junction_2328
+scene_type_overrides:
+  town05_opt_junction_0207: multi_lane_junction_runtime_replacement
+  town05_opt_junction_0979: multi_lane_junction_runtime_replacement
+  town04_opt_junction_0053: multi_lane_junction_runtime_replacement
+  town10_junction_0664: junction_like_runtime_replacement
+  town10_junction_0468: junction_like_runtime_backup
+  town04_opt_junction_1159: straight_through_junction_runtime_backup
+  town05_opt_junction_0838: multi_lane_junction_runtime_backup
+  town05_opt_junction_1292: multi_lane_junction_runtime_backup
+  town05_opt_junction_1427: multi_lane_junction_runtime_backup
+  town05_opt_junction_1574: multi_lane_junction_runtime_backup
+  town05_opt_junction_1126: junction_like_runtime_backup
+  town05_opt_junction_2014: junction_like_runtime_backup
+  town05_opt_junction_2240: junction_like_runtime_backup
+  town05_opt_junction_2328: junction_like_runtime_backup

@@ -1,0 +1,10 @@
+name: sionna-rt-2x
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - --index-url https://pypi.org/simple
+      - sionna-rt==2.0.1
+      - imageio-ffmpeg>=0.4.9

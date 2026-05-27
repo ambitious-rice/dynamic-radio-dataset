@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import math
 import shutil
-from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -94,7 +93,9 @@ def build_route_library(config: dict) -> dict:
     route_source = resolve_repo_path(config["routes"]["source_dir"])
     scene_meta = load_json(route_source / "scene_meta.json")
     routes = load_json(route_source / "routes.json")["routes"]
-    tx_catalog = load_json(resolve_repo_path(config["scene"]["static_dir"]) / "tx_catalog.json")["tx_catalog"]
+    local_tx_catalog = dataset_root / "scene_static" / "tx_catalog.json"
+    configured_tx_catalog = resolve_repo_path(config["scene"]["static_dir"]) / "tx_catalog.json"
+    tx_catalog = load_json(local_tx_catalog if local_tx_catalog.exists() else configured_tx_catalog)["tx_catalog"]
 
     label_center, center_source = _canonical_junction_center(scene_meta)
     tx_ids = [str(tx["tx_id"]) for tx in tx_catalog]
@@ -161,6 +162,9 @@ def build_route_library(config: dict) -> dict:
     summary = {
         "route_count": len(features),
         "conflict_pair_count": len(conflicts),
+        "turn_type_histogram": _histogram(row.get("turn_type", "unknown") for row in features),
+        "route_length_summary": _summary([float(row.get("route_length_m", 0.0)) for row in features]),
+        "route_conflict_density": float(len(conflicts) / max(len(features), 1)),
         "tx_ids": tx_ids,
         "canonical_junction_center_xy": [float(label_center[0]), float(label_center[1])],
         "canonical_junction_center_source": center_source,
@@ -169,3 +173,17 @@ def build_route_library(config: dict) -> dict:
     }
     save_json(output_dir / "route_library_summary.json", summary)
     return summary
+
+
+def _histogram(values) -> dict[str, int]:
+    result: dict[str, int] = {}
+    for value in values:
+        key = str(value)
+        result[key] = result.get(key, 0) + 1
+    return result
+
+
+def _summary(values: list[float]) -> dict[str, float | int | None]:
+    if not values:
+        return {"count": 0, "min": None, "max": None, "mean": None}
+    return {"count": len(values), "min": min(values), "max": max(values), "mean": sum(values) / len(values)}

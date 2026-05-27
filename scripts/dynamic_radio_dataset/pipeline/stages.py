@@ -2,15 +2,14 @@ from __future__ import annotations
 
 import json
 import shutil
-import sys
 from collections import Counter
 from pathlib import Path
 from typing import Any, Sequence
 
+from dynamic_radio_dataset.indexing.finalize import finalize_index
 from dynamic_radio_dataset.json_utils import load_json, save_json
 from dynamic_radio_dataset.paths import dataset_root, ensure_dataset_dirs, resolve_repo_path
-from dynamic_radio_dataset.rf.processing import expected_tx_ids, process_rf, rf_episode_complete, trajectory_qc_pass
-from dynamic_radio_dataset.rf.runtime import run_command
+from dynamic_radio_dataset.rf.processing import expected_tx_count, expected_tx_ids, process_rf, rf_episode_complete, trajectory_qc_pass
 
 
 def prepare_scene(config: dict) -> dict:
@@ -86,8 +85,9 @@ def verify_release_dataset(config: dict, expected_episodes: int | None = None) -
     if expected_episode_count <= 0:
         raise ValueError("release verification needs an expected accepted episode count.")
     tx_ids = expected_tx_ids(config)
+    tx_count = expected_tx_count(config)
     expected_shape = [
-        len(tx_ids),
+        tx_count,
         int(round(float(config["traffic"]["duration_s"]) * float(config["traffic"]["fps"]))),
         int(config.get("sionna", {}).get("resolution", 128)),
         int(config.get("sionna", {}).get("resolution", 128)),
@@ -119,7 +119,7 @@ def verify_release_dataset(config: dict, expected_episodes: int | None = None) -
     else:
         rows = _release_rows_from_episode_reports(accepted_episode_dirs)
         row_source = "episode_qa_reports"
-    expected_rows = expected_episode_count * len(tx_ids)
+    expected_rows = expected_episode_count * tx_count
     if len(rows) != expected_rows:
         raise RuntimeError(f"Release episode-TX row mismatch: expected {expected_rows}, found {len(rows)}.")
     configured_gpu_ids = [str(item) for item in config.get("sionna", {}).get("gpu_ids", [])]
@@ -222,17 +222,7 @@ def _release_rows_from_episode_reports(episode_dirs: Sequence[Path]) -> list[dic
 
 
 def _run_existing_finalize(root: Path, split_seed: int) -> None:
-    cmd: list[object] = [
-        sys.executable,
-        "-m",
-        "dynamic_radio_dataset.pipeline.process_rf",
-        "finalize-index",
-        "--dataset-root",
-        root,
-        "--split-seed",
-        int(split_seed),
-    ]
-    run_command(cmd)
+    finalize_index(root, int(split_seed))
 
 
 def _write_bucket_summary(root: Path) -> None:
@@ -435,4 +425,3 @@ def _rf_pass_rate_by_actual_total_vehicle_count(rows: list[dict]) -> dict[str, d
         }
         for count, group in sorted(grouped.items())
     }
-

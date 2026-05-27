@@ -1,0 +1,13 @@
+name: drd-orchestrator
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - numpy>=1.24
+  - matplotlib>=3.7
+  - scipy>=1.10
+  - pillow>=10
+  - pyyaml>=6
+  - pip:
+      - imageio-ffmpeg>=0.4.9

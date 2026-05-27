@@ -12,6 +12,9 @@ DEFAULT_SIONNA_PYTHON = Path("/share1/fzj/miniconda3/envs/sionna019/bin/python")
 
 
 def sionna_python(config: dict) -> Path:
+    override = os.environ.get("DRD_SIONNA_PYTHON")
+    if override:
+        return resolve_repo_path(override)
     return resolve_repo_path(config.get("sionna", {}).get("python", DEFAULT_SIONNA_PYTHON))
 
 
@@ -85,4 +88,3 @@ def with_package_path(env: dict[str, str] | None = None) -> dict[str, str]:
     existing = result.get("PYTHONPATH")
     result["PYTHONPATH"] = scripts_dir if not existing else f"{scripts_dir}:{existing}"
     return result
-

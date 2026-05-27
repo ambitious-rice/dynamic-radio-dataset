@@ -23,7 +23,9 @@ GREEN_ABSOLUTE_SAMPLE_STYLE = {
     "vehicle_overlay": "dark",
     "vmin_dbm": -108.0,
     "vmax_dbm": -42.0,
-    "visual_smooth_sigma": 0.8,
+    "visual_smooth_sigma": 0.0,
+    "interpolation": "nearest",
+    "visual_fill": False,
     "tx_marker_visible": False,
     "rx_height_m": 0.8,
 }
@@ -138,7 +140,7 @@ def _render_command(
     output_dir: Path,
     output_video: Path,
 ) -> list[object]:
-    return [
+    command: list[object] = [
         _render_python(config),
         "-m",
         "dynamic_radio_dataset.render.rss_video",
@@ -188,6 +190,8 @@ def _render_command(
         float(GREEN_ABSOLUTE_SAMPLE_STYLE["vmax_dbm"]),
         "--visual-smooth-sigma",
         float(GREEN_ABSOLUTE_SAMPLE_STYLE["visual_smooth_sigma"]),
+        "--interpolation",
+        str(GREEN_ABSOLUTE_SAMPLE_STYLE["interpolation"]),
         "--hide-tx-marker",
         "--fps",
         float(config.get("traffic", {}).get("fps", 10.0)),
@@ -196,6 +200,9 @@ def _render_command(
         "--resolution",
         int(config.get("sionna", {}).get("resolution", 128)),
     ]
+    if bool(GREEN_ABSOLUTE_SAMPLE_STYLE.get("visual_fill", False)):
+        command.append("--visual-fill")
+    return command
 
 
 def _load_cached_tx_position(source_rss_dir: Path) -> list[float]:
@@ -362,7 +369,7 @@ def _write_manifest(
         "available_accepted_episode_tx_rows": int(accepted_row_count),
         "style": {
             **GREEN_ABSOLUTE_SAMPLE_STYLE,
-            "style_source": "cached_rss_green_absolute_valid_crop_v2",
+            "style_source": "cached_rss_green_absolute_valid_crop_faithful_v3",
         },
         "summary": {
             "rendered_count": len(rows),

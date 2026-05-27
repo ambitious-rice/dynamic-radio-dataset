@@ -24,6 +24,7 @@ def process_rf(
     if policy != "all_tx":
         raise ValueError("Only rf_policy=all_tx is wired for formal processing; target_tx_first remains debug-only.")
     root = dataset_root(config)
+    assignment_summary = _ensure_selected_tx_assignments_if_configured(config)
     episode_dirs = trajectory_accepted_episode_dirs(root)
     if max_episodes is not None:
         episode_dirs = episode_dirs[: int(max_episodes)]
@@ -124,6 +125,7 @@ def process_rf(
         "use_gpu": bool(gpu_enabled),
         "gpu_ids": gpu_id_list,
         "worker_count": int(worker_count),
+        "tx_assignment": assignment_summary,
         "failures": failed,
     }
     if failed:
@@ -221,7 +223,7 @@ def process_rf_episode_slot(
 
 
 def rf_episode_complete(config: dict, episode_dir: Path) -> tuple[bool, dict[str, Any]]:
-    tx_ids = expected_tx_ids(config)
+    tx_ids = expected_tx_ids(config, episode_dir=episode_dir)
     expected_frames = int(round(float(config["traffic"]["duration_s"]) * float(config["traffic"]["fps"])))
     resolution = int(config.get("sionna", {}).get("resolution", 128))
     required = [
@@ -288,10 +290,33 @@ def rf_episode_complete(config: dict, episode_dir: Path) -> tuple[bool, dict[str
     }
 
 
-def expected_tx_ids(config: dict) -> list[str]:
+def expected_tx_ids(config: dict, episode_dir: Path | None = None) -> list[str]:
+    if episode_dir is not None and (episode_dir / "tx_assignment.json").exists():
+        assignment = load_json(episode_dir / "tx_assignment.json")
+        return [str(tx_id) for tx_id in assignment.get("selected_tx_ids", [])]
     tx_catalog_path = dataset_root(config) / "scene_static" / "tx_catalog.json"
     tx_catalog = load_json(tx_catalog_path)["tx_catalog"]
-    return [str(tx["tx_id"]) for tx in tx_catalog]
+    tx_ids = [str(tx["tx_id"]) for tx in tx_catalog]
+    selected_count = int(config.get("tx", {}).get("selected_tx_per_episode", 0)) if isinstance(config.get("tx"), dict) else 0
+    if selected_count > 0:
+        return tx_ids[:selected_count]
+    return tx_ids
+
+
+def expected_tx_count(config: dict) -> int:
+    selected_count = int(config.get("tx", {}).get("selected_tx_per_episode", 0)) if isinstance(config.get("tx"), dict) else 0
+    if selected_count > 0:
+        return selected_count
+    return len(expected_tx_ids(config))
+
+
+def _ensure_selected_tx_assignments_if_configured(config: dict) -> dict[str, Any]:
+    selected_count = int(config.get("tx", {}).get("selected_tx_per_episode", 0)) if isinstance(config.get("tx"), dict) else 0
+    if selected_count <= 0:
+        return {"mode": "all_tx"}
+    from dynamic_radio_dataset.tx.assignment import ensure_tx_assignments
+
+    return ensure_tx_assignments(config)
 
 
 def run_process_episode_subprocess(
@@ -362,4 +387,3 @@ def reference_export_dir(config: dict) -> Path:
     if local_reference_export.exists():
         return local_reference_export
     return resolve_repo_path(config["scene"]["reference_export_dir"])
-

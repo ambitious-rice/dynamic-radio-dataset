@@ -1,0 +1,99 @@
+# Runtime-resolved MultiScene20 config.
+# Updated 2026-05-12: replaced unfinished low-success scenes with validated candidate_id-only replacements.
+# See /share1/fzj/carla/datasets/DynamicRadioMap/MultiScene20/indexes/low_success_scene_replacement_report.json.
+dataset:
+  name: DynamicRadioMap-MultiScene20
+  root: datasets/DynamicRadioMap/MultiScene20
+  seed: 1701
+  split_seed: 7
+  accepted_trajectories_per_scene: 150
+  tx_candidates_per_scene: 40
+  selected_tx_per_episode: 5
+  episode_duration_s: 10
+  fps: 10
+  rss_grid:
+    - 128
+    - 128
+base_single_scene_config: configs/dynamic_radio/dynamic_radiomap_town10_300.yaml
+discovery:
+  towns:
+    - Town01_Opt
+    - Town02_Opt
+    - Town03_Opt
+    - Town04_Opt
+    - Town05_Opt
+    - Town10HD_Opt
+  scene_modes:
+    - junction
+    - corridor
+  max_candidates: 160
+  candidate_catalog: discovery/scene_candidates.jsonl
+  carla:
+    python: /share1/fzj/miniconda3/envs/carla0915/bin/python
+    host: localhost
+    port: 2000
+    timeout_s: 30.0
+  scene:
+    support_size: 192.0
+    valid_size: 96.0
+    route_step: 2.0
+    route_approach: 25.0
+    route_exit: 25.0
+    min_approach: 18.0
+    min_exit: 18.0
+    junction_core_radius: 12.0
+  preview:
+    image_size: 512
+    contact_sheet_columns: 5
+    output_dir: discovery/previews
+tx:
+  candidate_count: 40
+  selected_tx_per_episode: 5
+  placement_seed: 1701
+  assignment_seed: 1701
+  assignment_min_pairwise_distance_m: 6.0
+  placement:
+    method: roadside_proxy_lane_exclusion_v1
+    min_distance_to_road_m: 2.0
+    max_distance_to_road_m: 8.0
+    min_pairwise_tx_distance_m: 5.0
+    max_distance_to_scene_center_m: 44.0
+    grid_step_m: 1.5
+    lane_exclusion:
+      enabled: true
+      lane_sample_step_m: 2.0
+      lane_inflation_margin_m: 2.0
+scenes:
+  - scene_id: town04_opt_junction_1249
+    candidate_id: town04_opt_junction_1249
+    town: Town04_Opt
+    scene_type: junction_like_no_building_replacement
+    target_accepted: 150
+    selector:
+      mode: junction
+      junction_id: 1249
+    replacement_for_scene_id: town04_opt_junction_1368
+    replacement_reason: no_building_geometry_after_sionna_reexport_20260515
+    replacement_building_count_estimate: 27
+  - scene_id: town04_opt_junction_0255
+    candidate_id: town04_opt_junction_0255
+    town: Town04_Opt
+    scene_type: straight_through_junction_no_building_replacement
+    target_accepted: 150
+    selector:
+      mode: junction
+      junction_id: 255
+    replacement_for_scene_id: town04_opt_junction_1061
+    replacement_reason: no_building_geometry_after_sionna_reexport_20260515
+    replacement_building_count_estimate: 17
+  - scene_id: town04_opt_junction_0850
+    candidate_id: town04_opt_junction_0850
+    town: Town04_Opt
+    scene_type: straight_through_junction_no_building_replacement
+    target_accepted: 150
+    selector:
+      mode: junction
+      junction_id: 850
+    replacement_for_scene_id: town04_opt_junction_1176
+    replacement_reason: no_building_geometry_after_sionna_reexport_20260515
+    replacement_building_count_estimate: 13

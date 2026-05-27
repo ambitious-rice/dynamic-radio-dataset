@@ -51,6 +51,7 @@ def run_checks(repo_root: Path) -> dict:
     _check_module_boundaries(package_root, failures)
     _check_train_config(repo_root, failures)
     _check_deprecated_constraint_residuals(repo_root, package_root, failures, warnings)
+    _check_multi_scene_config_isolation(repo_root, failures)
     _check_docs(repo_root, failures, warnings)
     _check_lightweight_init(package_root, failures)
     _check_trajectory_gate(package_root, failures)
@@ -232,6 +233,26 @@ def _check_deprecated_constraint_residuals(
         for term in DEPRECATED_CONFIG_TERMS:
             if term in text:
                 failures.append(f"deprecated hard-decision config remains: {path.relative_to(repo_root)}: {term}")
+
+
+def _check_multi_scene_config_isolation(repo_root: Path, failures: list[str]) -> None:
+    try:
+        from dynamic_radio_dataset.multi_scene.config import load_multi_scene_config, make_single_scene_config
+    except Exception as exc:  # noqa: BLE001
+        failures.append(f"could not import multi-scene config helpers: {type(exc).__name__}: {exc}")
+        return
+    for path in sorted((repo_root / "configs" / "dynamic_radio").glob("multi_scene*.yaml")):
+        try:
+            config = load_multi_scene_config(path)
+        except Exception:
+            continue
+        for scene in list(config.get("scenes", []))[:1]:
+            scene_config = make_single_scene_config(config, scene)
+            collection = scene_config.get("collection", {})
+            if isinstance(collection, dict) and collection.get("bucket_targets"):
+                failures.append(f"multi-scene config inherits single-scene bucket_targets: {path.relative_to(repo_root)}")
+            if isinstance(collection, dict) and collection.get("selection_matrix"):
+                failures.append(f"multi-scene config inherits single-scene selection_matrix: {path.relative_to(repo_root)}")
 
 
 def _check_docs(repo_root: Path, failures: list[str], warnings: list[str]) -> None:

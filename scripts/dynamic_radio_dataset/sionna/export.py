@@ -40,6 +40,9 @@ Vec3 = Tuple[float, float, float]
 Face = Tuple[int, int, int]
 
 VEHICLE_SIZE_MISMATCH_RATIO = 0.35
+SEALED_UNDERBODY_VEHICLE_TYPE = "vehicle.mitsubishi.fusorosa"
+SEALED_UNDERBODY_HEIGHT_M = 0.55
+SEALED_UNDERBODY_MARGIN_M = 0.0
 
 
 def parse_args() -> argparse.Namespace:
@@ -427,6 +430,83 @@ def size_error_stats(mesh_size: Sequence[float], bbox_size: Sequence[float]) -> 
     return {"abs_m": abs_error, "rel": rel_error}
 
 
+def vehicle_uses_sealed_underbody(actor: Dict[str, object]) -> bool:
+    return str(actor.get("vehicle_type", "")).lower() == SEALED_UNDERBODY_VEHICLE_TYPE
+
+
+def append_underbody_seal(
+    geometry: Dict[str, object],
+    *,
+    actor: Dict[str, object],
+    height_m: float,
+    margin_m: float,
+    ground_z: float,
+) -> Dict[str, object]:
+    vertices = [tuple(float(value) for value in row) for row in geometry["mesh_vertices"]]
+    faces = [tuple(int(value) for value in row) for row in geometry["mesh_faces"]]
+    if not vertices:
+        return {
+            "applied": False,
+            "reason": "empty_mesh",
+        }
+
+    zs = [vertex[2] for vertex in vertices]
+    mesh_z_min = min(zs)
+    z_max = max(zs)
+    z0 = max(float(mesh_z_min), float(ground_z) + 1.0e-3)
+    slab_height = max(0.0, min(float(height_m), z_max - z0))
+    if slab_height <= 0.0:
+        return {
+            "applied": False,
+            "reason": "nonpositive_height",
+            "requested_height_m": float(height_m),
+        }
+
+    z1 = z0 + slab_height
+    bbox = actor["bbox_extent"]
+    ex = max(0.0, float(bbox["x"]) + float(margin_m))
+    ey = max(0.0, float(bbox["y"]) + float(margin_m))
+    if ex <= 0.0 or ey <= 0.0:
+        return {
+            "applied": False,
+            "reason": "degenerate_footprint",
+            "margin_m": float(margin_m),
+        }
+
+    tf = actor["transform"]
+    center = (float(tf["x"]), float(tf["y"]), (z0 + z1) / 2.0)
+    slab_vertices, slab_faces = box_mesh(
+        center=center,
+        extent=(ex, ey, slab_height / 2.0),
+        yaw_deg=float(tf["yaw"]) + float(geometry.get("asset_yaw_offset_deg", 0.0)),
+    )
+    start = len(vertices)
+    slab_faces = [(start + int(a), start + int(b), start + int(c)) for a, b, c in slab_faces]
+    geometry["mesh_vertices"] = vertices + slab_vertices
+    geometry["mesh_faces"] = faces + slab_faces
+    geometry["geometry_proxy"] = "catalog_static_mesh_underbody_sealed"
+    footprint_x = [vertex[0] for vertex in slab_vertices]
+    footprint_y = [vertex[1] for vertex in slab_vertices]
+    return {
+        "applied": True,
+        "method": "append_oriented_bbox_underbody_slab",
+        "height_m": float(slab_height),
+        "requested_height_m": float(height_m),
+        "margin_m": float(margin_m),
+        "ground_z_m": float(ground_z),
+        "z_range_m": [float(z0), float(z1)],
+        "footprint_world": {
+            "x_min": float(min(footprint_x)),
+            "x_max": float(max(footprint_x)),
+            "y_min": float(min(footprint_y)),
+            "y_max": float(max(footprint_y)),
+        },
+        "bbox_extent_xy_m": [float(ex), float(ey)],
+        "added_vertex_count": len(slab_vertices),
+        "added_face_count": len(slab_faces),
+    }
+
+
 def make_vehicle_box_geometry(
     actor: Dict[str, object],
     bottom_clearance: float,
@@ -550,7 +630,7 @@ def build_vehicle_geometry(
         return geometry
 
     try:
-        return make_vehicle_catalog_geometry(
+        geometry = make_vehicle_catalog_geometry(
             actor=actor,
             catalog_entry=catalog_entry,
             content_dir=content_dir,
@@ -558,6 +638,17 @@ def build_vehicle_geometry(
             umodel_exe=umodel_exe,
             bottom_clearance=args.vehicle_bottom_clearance,
         )
+        if vehicle_uses_sealed_underbody(actor):
+            seal = append_underbody_seal(
+                geometry,
+                actor=actor,
+                height_m=SEALED_UNDERBODY_HEIGHT_M,
+                margin_m=SEALED_UNDERBODY_MARGIN_M,
+                ground_z=float(args.ground_z),
+            )
+            seal["sealed_vehicle_type"] = SEALED_UNDERBODY_VEHICLE_TYPE
+            geometry["underbody_seal"] = seal
+        return geometry
     except Exception as exc:  # noqa: BLE001
         geometry = make_vehicle_box_geometry(actor, args.vehicle_bottom_clearance, args.vehicle_material)
         geometry["fallback_reason"] = f"{exc.__class__.__name__}:{exc}"
@@ -674,6 +765,7 @@ def build_vehicle_manifest_entry(
             "size_error": geometry["size_error"],
             "approximate_match": bool(geometry.get("approximate_match", False)),
             "geometry_proxy": geometry["geometry_proxy"],
+            "underbody_seal": geometry.get("underbody_seal"),
         }
     )
     return motion_entry
@@ -811,6 +903,9 @@ def main() -> int:
             "content_dir": str(content_dir),
             "require_vehicle_meshes": bool(args.require_vehicle_meshes),
             "vehicle_bottom_clearance_m": float(args.vehicle_bottom_clearance),
+            "sealed_underbody_vehicle_type": SEALED_UNDERBODY_VEHICLE_TYPE,
+            "sealed_underbody_height_m": SEALED_UNDERBODY_HEIGHT_M,
+            "sealed_underbody_margin_m": SEALED_UNDERBODY_MARGIN_M,
         },
         "materials": {
             "vehicles": args.vehicle_material,
@@ -840,6 +935,9 @@ def main() -> int:
         "snapshot_vehicle_count": len(vehicle_manifest),
         "vehicle_mesh_count": sum(1 for vehicle in vehicle_manifest if vehicle["geometry_mode"] == "catalog_mesh"),
         "vehicle_bbox_fallback_count": sum(1 for vehicle in vehicle_manifest if vehicle["geometry_mode"] == "bbox"),
+        "large_vehicle_underbody_seal_count": sum(
+            1 for vehicle in vehicle_manifest if bool((vehicle.get("underbody_seal") or {}).get("applied"))
+        ),
         "vehicle_mesh_fallbacks": vehicle_mesh_fallbacks,
         "motion_frame_count": frame_count,
         "motion_vehicle_updates": actor_updates,
@@ -857,6 +955,7 @@ def main() -> int:
     print(f"[OK] Wrote meshes: {mesh_dir}")
     print(f"[OK] Vehicle catalog meshes: {manifest['vehicle_mesh_count']}")
     print(f"[OK] Vehicle bbox fallbacks: {manifest['vehicle_bbox_fallback_count']}")
+    print(f"[OK] Large vehicle underbody seals: {manifest['large_vehicle_underbody_seal_count']}")
     if args.include_buildings:
         print(f"[OK] Wrote building bbox proxies: {len(building_manifest)}")
     print(f"[OK] Wrote motion: {args.output_dir / 'motion.jsonl'} ({frame_count} frames, {actor_updates} updates)")

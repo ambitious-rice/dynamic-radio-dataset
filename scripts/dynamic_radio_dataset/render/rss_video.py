@@ -22,6 +22,15 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
+from dynamic_radio_dataset.sionna.rt_compat import (
+    compute_radio_map_rss_watt,
+    configure_scene_arrays,
+    configure_scene_frequency,
+    load_scene_preserving_names,
+    make_backend_info,
+    radio_map_request_from_region,
+)
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate a dynamic Sionna RSS heatmap video.")
@@ -123,7 +132,17 @@ def parse_args() -> argparse.Namespace:
         "--visual-fill-threshold-dbm",
         type=float,
         default=-200.0,
-        help="For plotting only, nearest-fill cells below this RSS to reduce Monte Carlo no-hit speckles. Use very low value to disable.",
+        help="For plotting only, threshold used when --visual-fill is enabled.",
+    )
+    parser.add_argument(
+        "--visual-fill",
+        action="store_true",
+        help="For plotting only, opt in to legacy nearest-fill of no-hit/low-RSS cells.",
+    )
+    parser.add_argument(
+        "--no-visual-fill",
+        action="store_true",
+        help="Deprecated compatibility flag; visual fill is disabled unless --visual-fill is passed.",
     )
     parser.add_argument("--visual-smooth-sigma", type=float, default=0.0, help="For plotting only, Gaussian smoothing sigma in grid cells.")
     parser.add_argument(
@@ -390,13 +409,6 @@ def region_extent_for_plot(region: Dict[str, object]) -> Tuple[float, float, flo
     )
 
 
-def xy_to_region_local(xy: np.ndarray, region: Dict[str, object]) -> np.ndarray:
-    center = region_center(region)
-    x_axis, y_axis = region_axes(region)
-    delta = xy - center[None, :]
-    return np.stack([delta @ x_axis, delta @ y_axis], axis=-1)
-
-
 def cell_centers_from_region(region: Dict[str, object], resolution: int) -> np.ndarray:
     center = region_center(region)
     width, height = region_size(region)
@@ -497,15 +509,11 @@ def apply_motion_frame(
 
 
 def compute_rss_map(scene, args: argparse.Namespace, rx_region: Dict[str, object]) -> np.ndarray:
-    center = rx_region["center"]
-    width, height = region_size(rx_region)
-    cell_size = [width / float(args.resolution), height / float(args.resolution)]
-    cm = scene.coverage_map(
-        max_depth=args.max_depth,
-        cm_center=[float(center["x"]), float(center["y"]), float(args.rx_height)],
-        cm_orientation=[0.0, 0.0, math.radians(float(rx_region.get("yaw_deg", 0.0)))],
-        cm_size=[width, height],
-        cm_cell_size=cell_size,
+    request = radio_map_request_from_region(
+        rx_region,
+        resolution=int(args.resolution),
+        rx_height=float(args.rx_height),
+        max_depth=int(args.max_depth),
         num_samples=int(args.num_samples),
         num_runs=int(args.num_runs),
         los=not args.no_los,
@@ -514,7 +522,7 @@ def compute_rss_map(scene, args: argparse.Namespace, rx_region: Dict[str, object
         scattering=bool(args.scattering),
         edge_diffraction=bool(args.edge_diffraction),
     )
-    rss_watt = np.asarray(cm.rss.numpy(), dtype=np.float64)
+    rss_watt = compute_radio_map_rss_watt(scene, request)
     if rss_watt.ndim != 3 or rss_watt.shape[0] < 1:
         raise RuntimeError(f"Unexpected RSS tensor shape: {rss_watt.shape}")
     return dbm_from_watt(rss_watt[0])
@@ -532,7 +540,7 @@ def prepare_plot_values(
         finite = np.isfinite(plot_values)
         source = finite & (~building) & (plot_values > float(args.visual_fill_threshold_dbm))
         fill_target = (~building) & (~source)
-        if np.any(fill_target) and np.any(source):
+        if visual_fill_enabled(args) and np.any(fill_target) and np.any(source):
             try:
                 from scipy.ndimage import distance_transform_edt
 
@@ -560,6 +568,10 @@ def prepare_plot_values(
         plot_values = plot_values.copy()
         plot_values[building_mask] = np.nan
     return plot_values
+
+
+def visual_fill_enabled(args: argparse.Namespace) -> bool:
+    return bool(getattr(args, "visual_fill", False)) and not bool(getattr(args, "no_visual_fill", False))
 
 
 def build_display_stack(rss_stack: np.ndarray, args: argparse.Namespace) -> np.ndarray:
@@ -650,7 +662,7 @@ def draw_heatmap_frame(
     support_extent = region_extent_for_plot(support_region)
     view_region = args.view_region or ("valid" if args.plot_style == "clean" else "support")
     view_extent = extent if view_region == "valid" else support_extent
-    interpolation = args.interpolation or ("bilinear" if args.plot_style == "clean" else "nearest")
+    interpolation = args.interpolation or "nearest"
     vehicle_overlay = args.vehicle_overlay or ("dark" if args.plot_style == "clean" else "light")
     palette = resolve_overlay_colors(args, vehicle_overlay)
 
@@ -854,6 +866,11 @@ def load_stats_rows(path: Path) -> List[Dict[str, object]]:
 
 def main() -> int:
     args = parse_args()
+    if args.reuse_rss_dir is None:
+        print(
+            "[WARN] render.rss_video fresh Sionna RSS computation is deprecated; "
+            "formal RF generation uses dynamic_radio_dataset.rf.rss_compute."
+        )
     if args.display_mode != "absolute" and args.cmap == "turbo":
         args.cmap = "coolwarm"
     os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
@@ -941,19 +958,23 @@ def main() -> int:
         print(f"[INFO] Reusing cached RSS stack from: {reuse_rss_dir}")
         print(f"[INFO] Buildings in propagation scene: {building_count}")
         print(f"[INFO] Cars represented in cached RSS: {len(selected_car_names)}")
+        sionna_backend_info: Dict[str, object] = (
+            ((reuse_meta.get("propagation") or {}).get("sionna_backend") or {})
+            if isinstance(reuse_meta, dict)
+            else {}
+        )
     else:
-        from sionna.rt import PlanarArray, Transmitter, load_scene
+        from sionna.rt import PlanarArray, Transmitter
         import mitsuba as mi
 
         rows = select_motion_frames(motion_path, args.start_frame, args.end_frame, args.stride)
         building_mask = building_mask_from_manifest(manifest, rx_region, args.resolution) if args.mask_building_cells else None
 
-        scene = load_scene(str(scene_path))
-        scene.frequency = float(args.frequency)
-        scene.bandwidth = float(args.bandwidth)
-        scene.synthetic_array = True
-        scene.tx_array = PlanarArray(num_rows=1, num_cols=1, vertical_spacing=0.5, horizontal_spacing=0.5, pattern="iso", polarization="V")
-        scene.rx_array = PlanarArray(num_rows=1, num_cols=1, vertical_spacing=0.5, horizontal_spacing=0.5, pattern="iso", polarization="V")
+        scene = load_scene_preserving_names(str(scene_path))
+        configure_scene_frequency(scene, frequency=float(args.frequency), bandwidth=float(args.bandwidth))
+        configure_scene_arrays(scene, planar_array_cls=PlanarArray)
+        sionna_backend = make_backend_info(scene)
+        sionna_backend_info = dict(sionna_backend.__dict__)
         scene.add(
             Transmitter(
                 "tx_valid_edge",
@@ -988,6 +1009,7 @@ def main() -> int:
         moving_vehicles_rows = []
         print(f"[INFO] Loaded scene: {scene_path}")
         print(f"[INFO] Mitsuba variant: {mi.variant()}")
+        print(f"[INFO] Sionna RT backend: {sionna_backend.package_version}, API={sionna_backend.radio_map_api}")
         print(f"[INFO] Buildings in propagation scene: {building_count}")
         print(f"[INFO] Cars in scene: {len(car_names)} total; {len(selected_car_names)} kept in propagation: {selected_car_names}")
         if stability_filter.get("enabled"):
@@ -1144,6 +1166,7 @@ def main() -> int:
             "total_vehicle_objects_in_scene": len(car_names),
             "active_vehicle_objects": selected_car_names,
             "allow_zero_vehicles": bool(args.allow_zero_vehicles),
+            "sionna_backend": sionna_backend_info,
             "materials_follow_van3twin_style": {
                 "buildings": "itu_concrete proxy in current export",
                 "road": "itu_concrete",
@@ -1159,17 +1182,21 @@ def main() -> int:
             "vehicle_overlay": args.vehicle_overlay or ("dark" if args.plot_style == "clean" else "light"),
             "tx_marker_visible": not bool(args.hide_tx_marker),
             "visual_fill_threshold_dbm": float(args.visual_fill_threshold_dbm),
+            "visual_fill_enabled": visual_fill_enabled(args),
             "visual_smooth_sigma": float(args.visual_smooth_sigma),
+            "interpolation": args.interpolation or "nearest",
             "display_mode": args.display_mode,
             "style_preset": (
-                "legacy_showcase"
+                "faithful_cached_128"
                 if (
                     args.plot_style == "clean"
                     and args.display_mode == "absolute"
                     and args.cmap == "viridis"
                     and math.isclose(float(args.vmin_dbm), -108.0)
                     and math.isclose(float(args.vmax_dbm), -42.0)
-                    and math.isclose(float(args.visual_smooth_sigma), 0.8)
+                    and not visual_fill_enabled(args)
+                    and math.isclose(float(args.visual_smooth_sigma), 0.0)
+                    and (args.interpolation is None or args.interpolation == "nearest")
                     and bool(args.hide_tx_marker)
                 )
                 else "custom"

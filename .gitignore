@@ -22,13 +22,23 @@
 
 !/docs/
 !/docs/README.md
+!/docs/README_MIGRATION.md
 !/docs/QA_AND_FAILURES.md
 !/docs/RUNTIME_ENVIRONMENT.md
+
+!/envs/
+!/envs/**
 
 !/scripts/
 !/scripts/drd.py
 !/scripts/run_DynamicRadioMap_Town10_300.sh
 !/scripts/setup_umodel_toolchain.sh
+!/scripts/release_packager/
+!/scripts/release_packager/**
+!/scripts/drd_research/
+!/scripts/drd_research/**
+!/scripts/qa_audit/
+!/scripts/qa_audit/**
 !/scripts/dynamic_radio_dataset/
 !/scripts/dynamic_radio_dataset/**
 

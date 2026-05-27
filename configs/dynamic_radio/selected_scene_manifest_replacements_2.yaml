@@ -1,0 +1,23 @@
+schema: selected_scene_manifest_v1
+multi_scene_config: configs/dynamic_radio/multi_scene_replacements_2x150.yaml
+source_candidate_catalog: datasets/DynamicRadioMap/MultiScene20/discovery/scene_candidates.jsonl
+target_scene_count: 2
+target_accepted_per_scene: 150
+selection_policy: supplemental_backup_replacements_for_plan_empty_corridors
+selected_candidate_ids:
+  - town05_opt_junction_1722
+  - town04_opt_junction_0483
+backup_candidate_ids:
+  - town05_opt_junction_0207
+  - town05_opt_junction_0979
+  - town04_opt_junction_0053
+  - town10_junction_0664
+  - town10_junction_0023
+scene_type_overrides:
+  town05_opt_junction_1722: multi_lane_junction_extended_backup
+  town04_opt_junction_0483: multi_lane_junction_extended_backup
+  town05_opt_junction_0207: multi_lane_junction_extended_backup
+  town05_opt_junction_0979: multi_lane_junction_extended_backup
+  town04_opt_junction_0483: multi_lane_junction_extended_backup
+  town04_opt_junction_0053: multi_lane_junction_extended_backup
+  town10_junction_0664: junction_like_backup

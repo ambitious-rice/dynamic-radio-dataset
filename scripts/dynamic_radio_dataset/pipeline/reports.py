@@ -1,11 +1,16 @@
 from __future__ import annotations
 
-import json
 import shutil
 from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from dynamic_radio_dataset.diagnostics.dataset_scan import (
+    load_json_files,
+    load_optional_json,
+    load_rf_failure_summaries,
+    read_jsonl,
+)
 from dynamic_radio_dataset.json_utils import load_json, save_json
 from dynamic_radio_dataset.paths import dataset_root
 
@@ -16,15 +21,15 @@ FULL_RUN_TX_PAIRS = 9000
 
 def write_timing_report(config: dict) -> dict:
     root = dataset_root(config)
-    attempts = _load_json_files(root / "attempts", "attempt_*/attempt_meta.json")
-    rf_metas = _load_json_files(root / "episodes", "episode_*/rf_process_meta.json")
-    rf_failure_summaries = _load_rf_failure_summaries(root)
-    trajectory_reports = _load_json_files(root / "episodes", "episode_*/trajectory_qa.json")
-    qa_reports = _load_json_files(root / "episodes", "episode_*/qa_report.json")
-    index_rows = _read_jsonl(root / "episode_index.jsonl")
-    command_timings = _read_jsonl(root / "command_timings.jsonl")
-    visualization_manifest = _load_optional_json(root / "renders" / "green_absolute_sample" / "sampled_visualizations.json")
-    collection_summary = _load_optional_json(root / "collection_summary.json")
+    attempts = load_json_files(root / "attempts", "attempt_*/attempt_meta.json")
+    rf_metas = load_json_files(root / "episodes", "episode_*/rf_process_meta.json")
+    rf_failure_summaries = load_rf_failure_summaries(root, dedupe=True)
+    trajectory_reports = load_json_files(root / "episodes", "episode_*/trajectory_qa.json")
+    qa_reports = load_json_files(root / "episodes", "episode_*/qa_report.json")
+    index_rows = read_jsonl(root / "episode_index.jsonl")
+    command_timings = read_jsonl(root / "command_timings.jsonl")
+    visualization_manifest = load_optional_json(root / "renders" / "green_absolute_sample" / "sampled_visualizations.json")
+    collection_summary = load_optional_json(root / "collection_summary.json")
     selection_manifest = _load_selection_manifest(config, root, collection_summary)
     target_trajectories, target_tx_pairs = _target_full_run_counts(config, root)
 
@@ -165,81 +170,6 @@ def write_timing_report(config: dict) -> dict:
     return {"timing_report": str(root / "timing_report.json"), "index_copy": str(indexes_dir / "timing_report.json")}
 
 
-def _load_json_files(root: Path, pattern: str) -> list[dict]:
-    if not root.exists():
-        return []
-    rows: list[dict] = []
-    for path in sorted(root.glob(pattern)):
-        try:
-            row = load_json(path)
-        except Exception:  # noqa: BLE001
-            continue
-        row["_source_path"] = str(path)
-        rows.append(row)
-    return rows
-
-
-def _load_optional_json(path: Path) -> dict | None:
-    if not path.exists():
-        return None
-    try:
-        value = load_json(path)
-    except Exception:  # noqa: BLE001
-        return None
-    return value if isinstance(value, dict) else None
-
-
-def _load_rf_failure_summaries(root: Path) -> list[dict]:
-    candidates = [root / "rf_failure_summary.json"]
-    candidates.extend(sorted(root.glob("rf_failure_summary_*.json")))
-    summaries: list[dict] = []
-    seen: set[str] = set()
-    for path in candidates:
-        value = _load_optional_json(path)
-        if value is None:
-            continue
-        signature = json.dumps(
-            {
-                "schema": value.get("schema"),
-                "use_gpu": value.get("use_gpu"),
-                "gpu_ids": value.get("gpu_ids"),
-                "worker_count": value.get("worker_count"),
-                "episode_candidates": value.get("episode_candidates"),
-                "queued_episode_count": value.get("queued_episode_count"),
-                "processed_episode_count": value.get("processed_episode_count"),
-                "failed_episode_count": value.get("failed_episode_count"),
-                "failures": [
-                    {
-                        "episode_id": item.get("episode_id"),
-                        "gpu_id": item.get("gpu_id"),
-                        "worker_index": item.get("worker_index"),
-                        "mitsuba_variant": item.get("mitsuba_variant"),
-                        "status": item.get("status"),
-                    }
-                    for item in value.get("failures", [])
-                    if isinstance(item, dict)
-                ],
-            },
-            sort_keys=True,
-        )
-        if signature in seen:
-            continue
-        seen.add(signature)
-        value["_source_path"] = str(path)
-        summaries.append(value)
-    return summaries
-
-
-def _read_jsonl(path: Path) -> list[dict]:
-    if not path.exists():
-        return []
-    rows: list[dict] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if line.strip():
-            rows.append(json.loads(line))
-    return rows
-
-
 def _latest_elapsed(command_timings: list[dict], command: str) -> float | None:
     matching = [row for row in command_timings if row.get("command") == command and row.get("status") == "ok"]
     if not matching:
@@ -289,7 +219,7 @@ def _load_selection_manifest(config: dict, root: Path, collection_summary: dict 
     for path in candidates:
         if not path.exists():
             continue
-        value = _load_optional_json(path)
+        value = load_optional_json(path)
         if value is not None:
             return value
     return None
@@ -317,7 +247,10 @@ def _target_full_run_counts(config: dict, root: Path) -> tuple[int, int]:
         except Exception:  # noqa: BLE001
             tx_count = 0
     if tx_count <= 0:
-        tx_count = int(config.get("tx", {}).get("count", 3))
+        tx_count = int(config.get("tx", {}).get("selected_tx_per_episode", config.get("tx", {}).get("count", 3)))
+    selected_tx = int(config.get("tx", {}).get("selected_tx_per_episode", 0)) if isinstance(config.get("tx"), dict) else 0
+    if selected_tx > 0:
+        tx_count = selected_tx
     return int(trajectory_target), int(trajectory_target * max(tx_count, 1))
 
 

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import argparse
-import json
 from collections import Counter
 from pathlib import Path
 from typing import Any, Iterable
 
 from dynamic_radio_dataset.configs import load_config
-from dynamic_radio_dataset.json_utils import load_json, save_json
+from dynamic_radio_dataset.diagnostics.dataset_scan import scan_dataset
+from dynamic_radio_dataset.diagnostics.histograms import failure_code_histogram, histogram, sorted_counter
+from dynamic_radio_dataset.json_utils import save_json
 from dynamic_radio_dataset.paths import dataset_root
 
 
@@ -27,13 +28,14 @@ def write_failure_report(
 
 def build_failure_report(root: Path, *, max_examples: int = 5) -> dict[str, Any]:
     max_examples = max(1, int(max_examples))
-    attempts = _load_attempt_records(root)
-    failed_attempts = _load_failed_attempt_records(root)
-    trajectory_reports = _load_trajectory_records(root)
-    rf_metas = _load_rf_meta_records(root)
-    rf_summaries = _load_rf_failure_summaries(root)
-    qa_reports = _load_qa_records(root)
-    index_rows = _read_jsonl(root / "episode_index.jsonl")
+    scan = scan_dataset(root)
+    attempts = scan.attempts
+    failed_attempts = scan.failed_attempts
+    trajectory_reports = scan.trajectory_reports
+    rf_metas = scan.rf_metas
+    rf_summaries = scan.rf_failure_summaries
+    qa_reports = scan.qa_reports
+    index_rows = scan.index_rows
 
     accepted_attempts = [row for row in attempts if str(row.get("status")) == "TRAJECTORY_ACCEPTED"]
     failed_attempt_rows = [row for row in attempts if str(row.get("status")) != "TRAJECTORY_ACCEPTED"]
@@ -58,8 +60,8 @@ def build_failure_report(root: Path, *, max_examples: int = 5) -> dict[str, Any]
             "indexed_row_count": int(len(index_rows)),
         },
         "histograms": {
-            "attempt_status": _histogram(attempts, "status"),
-            "failure_code": _failure_code_histogram(attempts, failed_attempts, trajectory_failures, rf_failures, per_tx_failures),
+            "attempt_status": histogram(attempts, "status"),
+            "failure_code": failure_code_histogram(attempts, failed_attempts, trajectory_failures, rf_failures, per_tx_failures),
             "route_id": _route_histogram(attempts, failed_attempts, trajectory_reports),
             "requested_vehicle_count": _plan_value_histogram(attempts, failed_attempts, "vehicle_count"),
             "actual_vehicle_count": _actual_vehicle_histogram(trajectory_reports, qa_reports),
@@ -80,124 +82,6 @@ def build_failure_report(root: Path, *, max_examples: int = 5) -> dict[str, Any]
         },
     }
     return report
-
-
-def _load_attempt_records(root: Path) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
-    for path in sorted((root / "attempts").glob("attempt_*/attempt_meta.json")):
-        row = _load_json_record(path)
-        if row is None:
-            continue
-        row.setdefault("source_path", str(path))
-        row.setdefault("attempt_id", path.parent.name)
-        _attach_plan(row, path.parent / "plan.json")
-        records.append(row)
-    return records
-
-
-def _load_failed_attempt_records(root: Path) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
-    for failed_dir in sorted((root / "failed_attempts").glob("*")):
-        if not failed_dir.is_dir():
-            continue
-        meta = _load_json_record(failed_dir / "attempt_meta.json")
-        failure = _load_json_record(failed_dir / "failure.json")
-        row = dict(meta or failure or {})
-        if failure:
-            row.setdefault("failure_code", failure.get("failure_code"))
-            row.setdefault("status", failure.get("status"))
-            row["failure_record"] = failure
-        row.setdefault("source_path", str((failed_dir / "attempt_meta.json") if meta else failed_dir))
-        row.setdefault("attempt_id", failed_dir.name)
-        _attach_plan(row, failed_dir / "plan.json")
-        records.append(row)
-    return records
-
-
-def _load_trajectory_records(root: Path) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
-    for base in (root / "episodes", root / "failed_attempts"):
-        for path in sorted(base.glob("*/trajectory_qa.json")):
-            row = _load_json_record(path)
-            if row is None:
-                continue
-            row.setdefault("source_path", str(path))
-            row.setdefault("episode_id", path.parent.name)
-            _attach_plan(row, path.parent / "plan.json")
-            records.append(row)
-    return records
-
-
-def _load_rf_meta_records(root: Path) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
-    for path in sorted((root / "episodes").glob("episode_*/rf_process_meta.json")):
-        row = _load_json_record(path)
-        if row is None:
-            continue
-        row.setdefault("source_path", str(path))
-        row.setdefault("episode_id", path.parent.name)
-        records.append(row)
-    return records
-
-
-def _load_rf_failure_summaries(root: Path) -> list[dict[str, Any]]:
-    summaries: list[dict[str, Any]] = []
-    candidates = [root / "rf_failure_summary.json"]
-    candidates.extend(sorted(root.glob("rf_failure_summary_*.json")))
-    for path in candidates:
-        row = _load_json_record(path)
-        if row is None:
-            continue
-        row.setdefault("source_path", str(path))
-        summaries.append(row)
-    return summaries
-
-
-def _load_qa_records(root: Path) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
-    for path in sorted((root / "episodes").glob("episode_*/qa_report.json")):
-        row = _load_json_record(path)
-        if row is None:
-            continue
-        row.setdefault("source_path", str(path))
-        row.setdefault("episode_id", path.parent.name)
-        records.append(row)
-    return records
-
-
-def _load_json_record(path: Path) -> dict[str, Any] | None:
-    if not path.exists():
-        return None
-    try:
-        value = load_json(path)
-    except Exception:  # noqa: BLE001
-        return {"source_path": str(path), "failure_code": "json_read_failed"}
-    return value if isinstance(value, dict) else None
-
-
-def _attach_plan(row: dict[str, Any], plan_path: Path) -> None:
-    plan = _load_json_record(plan_path)
-    if plan is None:
-        return
-    row.setdefault("plan_id", plan.get("plan_id"))
-    row.setdefault("plan_bucket", plan.get("bucket"))
-    row["plan"] = plan
-
-
-def _read_jsonl(path: Path) -> list[dict[str, Any]]:
-    if not path.exists():
-        return []
-    rows: list[dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        try:
-            value = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(value, dict):
-            rows.append(value)
-    return rows
 
 
 def _rf_failure_rows(rf_metas: list[dict[str, Any]], rf_summaries: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -236,32 +120,13 @@ def _per_tx_failure_rows(qa_reports: list[dict[str, Any]]) -> list[dict[str, Any
     return rows
 
 
-def _histogram(rows: Iterable[dict[str, Any]], key: str) -> dict[str, int]:
-    counter: Counter[str] = Counter()
-    for row in rows:
-        value = row.get(key)
-        if value is not None:
-            counter[str(value)] += 1
-    return _sorted_counter(counter)
-
-
-def _failure_code_histogram(*groups: Iterable[dict[str, Any]]) -> dict[str, int]:
-    counter: Counter[str] = Counter()
-    for group in groups:
-        for row in group:
-            code = row.get("failure_code")
-            if code:
-                counter[str(code)] += 1
-    return _sorted_counter(counter)
-
-
 def _route_histogram(*groups: Iterable[dict[str, Any]]) -> dict[str, int]:
     counter: Counter[str] = Counter()
     for group in groups:
         for row in group:
             for route_id in _route_ids(row):
                 counter[str(route_id)] += 1
-    return _sorted_counter(counter)
+    return sorted_counter(counter)
 
 
 def _plan_value_histogram(*groups_and_key: Any) -> dict[str, int]:
@@ -272,7 +137,7 @@ def _plan_value_histogram(*groups_and_key: Any) -> dict[str, int]:
             value = _plan_value(row, str(key))
             if value is not None:
                 counter[str(value)] += 1
-    return _sorted_counter(counter)
+    return sorted_counter(counter)
 
 
 def _actual_vehicle_histogram(trajectory_reports: list[dict[str, Any]], qa_reports: list[dict[str, Any]]) -> dict[str, int]:
@@ -288,7 +153,7 @@ def _actual_vehicle_histogram(trajectory_reports: list[dict[str, Any]], qa_repor
         value = counts.get("actual_total_vehicle_count")
         if value is not None:
             counter[str(int(value))] += 1
-    return _sorted_counter(counter)
+    return sorted_counter(counter)
 
 
 def _large_vehicle_histogram(
@@ -312,7 +177,7 @@ def _large_vehicle_histogram(
         value = summary.get("large_vehicle_count")
         if value is not None:
             counter[f"actual:{int(value)}"] += 1
-    return _sorted_counter(counter)
+    return sorted_counter(counter)
 
 
 def _plan_bucket_histogram(attempts: list[dict[str, Any]], failed_attempts: list[dict[str, Any]]) -> dict[str, int]:
@@ -323,7 +188,7 @@ def _plan_bucket_histogram(attempts: list[dict[str, Any]], failed_attempts: list
         target_large = bucket.get("target_large_vehicle_count", _plan_value(row, "target_large_vehicle_count"))
         if vehicle_count is not None:
             counter[f"vehicle_count_{vehicle_count}_large_{target_large if target_large is not None else 'unknown'}"] += 1
-    return _sorted_counter(counter)
+    return sorted_counter(counter)
 
 
 def _selection_cell_histogram(attempts: list[dict[str, Any]], failed_attempts: list[dict[str, Any]]) -> dict[str, int]:
@@ -333,7 +198,7 @@ def _selection_cell_histogram(attempts: list[dict[str, Any]], failed_attempts: l
         target_large = _plan_value(row, "target_large_vehicle_count")
         if vehicle_count is not None and target_large is not None:
             counter[f"v{int(vehicle_count)}_large{int(target_large)}"] += 1
-    return _sorted_counter(counter)
+    return sorted_counter(counter)
 
 
 def _carla_failures(rows: list[dict[str, Any]], failed_attempts: list[dict[str, Any]], *, max_examples: int) -> dict[str, Any]:
@@ -343,7 +208,7 @@ def _carla_failures(rows: list[dict[str, Any]], failed_attempts: list[dict[str, 
     return {
         "subprocess_failure_count": int(len(subprocess_rows)),
         "spawn_failure_count": int(len(spawn_rows)),
-        "failure_code_histogram": _failure_code_histogram(combined),
+        "failure_code_histogram": failure_code_histogram(combined),
         "examples": _examples(subprocess_rows + spawn_rows, max_examples=max_examples),
     }
 
@@ -355,8 +220,8 @@ def _trajectory_failure_summary(rows: list[dict[str, Any]], *, max_examples: int
             blocker_counter[str(blocker)] += 1
     return {
         "failure_count": int(len(rows)),
-        "failure_code_histogram": _histogram(rows, "failure_code"),
-        "blocker_histogram": _sorted_counter(blocker_counter),
+        "failure_code_histogram": histogram(rows, "failure_code"),
+        "blocker_histogram": sorted_counter(blocker_counter),
         "examples": _examples(rows, max_examples=max_examples),
     }
 
@@ -366,9 +231,9 @@ def _rf_failure_summary(rows: list[dict[str, Any]], *, max_examples: int) -> dic
     worker_counter = Counter(str(row.get("worker_index")) for row in rows if row.get("worker_index") is not None)
     return {
         "failure_count": int(len(rows)),
-        "failure_code_histogram": _histogram(rows, "failure_code"),
-        "gpu_histogram": _sorted_counter(gpu_counter),
-        "worker_histogram": _sorted_counter(worker_counter),
+        "failure_code_histogram": histogram(rows, "failure_code"),
+        "gpu_histogram": sorted_counter(gpu_counter),
+        "worker_histogram": sorted_counter(worker_counter),
         "examples": _examples(rows, max_examples=max_examples),
     }
 
@@ -382,8 +247,8 @@ def _per_tx_failure_summary(rows: list[dict[str, Any]], *, max_examples: int) ->
             metric_rows.append(metrics)
     return {
         "failure_count": int(len(rows)),
-        "failure_code_histogram": _histogram(rows, "failure_code"),
-        "tx_id_histogram": _sorted_counter(tx_counter),
+        "failure_code_histogram": histogram(rows, "failure_code"),
+        "tx_id_histogram": sorted_counter(tx_counter),
         "metric_example_count": int(len(metric_rows)),
         "examples": _examples(rows, max_examples=max_examples),
     }
@@ -406,7 +271,7 @@ def _accepted_vs_failed(attempts: list[dict[str, Any]], failed_attempts: list[di
             "vehicle_count": _plan_value_histogram(failed, "vehicle_count"),
             "large_vehicle_count": _plan_value_histogram(failed, "target_large_vehicle_count"),
             "selection_cell": _selection_cell_histogram(failed, []),
-            "failure_code": _failure_code_histogram(failed),
+            "failure_code": failure_code_histogram(failed),
         },
     }
 
@@ -453,10 +318,6 @@ def _plan_value(row: dict[str, Any], key: str) -> Any:
     if key in expected:
         return expected[key]
     return None
-
-
-def _sorted_counter(counter: Counter[str]) -> dict[str, int]:
-    return {key: int(counter[key]) for key in sorted(counter)}
 
 
 def parse_args() -> argparse.Namespace:

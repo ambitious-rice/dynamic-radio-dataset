@@ -9,8 +9,7 @@ import numpy as np
 from dynamic_radio_dataset.json_utils import load_json, save_json
 from dynamic_radio_dataset.paths import dataset_root, resolve_repo_path
 from dynamic_radio_dataset.plans.schemas import canonical_vehicle_role, role_is_required
-from dynamic_radio_dataset.routes.geometry import corridor_rectangle, point_in_rotated_rect, region_center
-from dynamic_radio_dataset.radio_dataset_utils import (
+from dynamic_radio_dataset.qa.metrics import (
     actor_center_xy,
     actor_tracks_from_states,
     building_collision_metrics,
@@ -21,6 +20,7 @@ from dynamic_radio_dataset.radio_dataset_utils import (
     vehicle_type_mix_metrics,
     vehicle_vehicle_collision_metrics,
 )
+from dynamic_radio_dataset.routes.geometry import corridor_rectangle, point_in_rotated_rect, region_center
 
 
 def evaluate_attempt_trajectory(attempt_dir: Path, config: dict) -> dict[str, Any]:

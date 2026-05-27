@@ -1,0 +1,50 @@
+dataset:
+  name: DynamicRadioMap-MultiScene20-Replacements
+  root: datasets/DynamicRadioMap/MultiScene20
+  seed: 1701
+  split_seed: 7
+  accepted_trajectories_per_scene: 150
+  tx_candidates_per_scene: 20
+  selected_tx_per_episode: 5
+  episode_duration_s: 10
+  fps: 10
+  rss_grid: [128, 128]
+
+base_single_scene_config: configs/dynamic_radio/dynamic_radiomap_town10_300.yaml
+
+# Supplemental scenes to replace plan-empty corridor scenes:
+#   town02_opt_corridor_0099, town02_opt_corridor_0078
+# Strict unused original backup_candidate_ids did not contain two reliable
+# plan-ready scenes: the remaining candidates were either previous CARLA prep
+# failures or one-route corridors likely to fail plan preflight. These two are
+# selected from the same discovered candidate catalog as extended backups.
+scenes:
+  - scene_id: town05_opt_junction_1722
+    candidate_id: town05_opt_junction_1722
+    town: Town05_Opt
+    scene_type: multi_lane_junction_extended_backup
+    target_accepted: 150
+    selector:
+      mode: junction
+      junction_id: 1722
+  - scene_id: town04_opt_junction_0483
+    candidate_id: town04_opt_junction_0483
+    town: Town04_Opt
+    scene_type: multi_lane_junction_extended_backup
+    target_accepted: 150
+    selector:
+      mode: junction
+      junction_id: 483
+
+tx:
+  candidate_count: 20
+  selected_tx_per_episode: 5
+  placement_seed: 1701
+  assignment_seed: 1701
+  assignment_min_pairwise_distance_m: 6.0
+  placement:
+    min_distance_to_road_m: 2.0
+    max_distance_to_road_m: 8.0
+    min_pairwise_tx_distance_m: 8.0
+    max_distance_to_scene_center_m: 42.0
+    grid_step_m: 1.5

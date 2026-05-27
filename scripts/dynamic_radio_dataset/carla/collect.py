@@ -12,10 +12,10 @@ import argparse
 import glob
 import json
 import math
-import os
 import queue
 import random
 import shutil
+import socket
 import struct
 import subprocess
 import sys
@@ -67,6 +67,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--host", type=str, default="localhost")
     parser.add_argument("--port", type=int, default=2000)
+    parser.add_argument(
+        "--traffic-manager-port",
+        type=int,
+        default=None,
+        help="Optional Traffic Manager RPC port; use distinct ports when running multiple CARLA servers.",
+    )
     parser.add_argument("--town", type=str, default="", help="e.g. Town03. Leave empty to keep current world.")
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--frames", type=int, default=240)
@@ -81,6 +87,10 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument("--scene-mode", choices=["junction", "corridor"], default="junction")
+    parser.add_argument("--scene-id", type=str, default="")
+    parser.add_argument("--scene-type", type=str, default="")
+    parser.add_argument("--scene-junction-id", type=int, default=None)
+    parser.add_argument("--scene-corridor-index", type=int, default=None)
     parser.add_argument("--valid-size", type=float, default=64.0, help="Square valid crop size in meters.")
     parser.add_argument("--support-size", type=float, default=112.0, help="Square support region size in meters.")
     parser.add_argument("--route-step", type=float, default=2.0)
@@ -167,6 +177,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=str, default="./datasets/dynamic_radio_scene_demo")
     parser.add_argument("--keep-existing", action="store_true")
     parser.add_argument("--no-video", action="store_true", help="Save PNG frames but skip video creation.")
+    parser.add_argument(
+        "--no-rendering-mode",
+        action="store_true",
+        help=(
+            "Enable CARLA world no_rendering_mode for trajectory-only collection. "
+            "Requires --no-video because RGB camera sensors need rendering."
+        ),
+    )
     parser.add_argument("--raw-avi-fallback", action="store_true", default=True)
     parser.add_argument("--no-raw-avi-fallback", dest="raw_avi_fallback", action="store_false")
     return parser.parse_args()
@@ -341,10 +359,18 @@ class SceneSpec:
 
 
 class CarlaSyncContext:
-    def __init__(self, world: carla.World, traffic_manager: carla.TrafficManager, fps: float):
+    def __init__(
+        self,
+        world: carla.World,
+        traffic_manager: carla.TrafficManager,
+        fps: float,
+        *,
+        no_rendering_mode: bool = False,
+    ):
         self.world = world
         self.tm = traffic_manager
         self.fps = fps
+        self.no_rendering_mode = bool(no_rendering_mode)
         self._old_settings = None
 
     def __enter__(self) -> "CarlaSyncContext":
@@ -352,7 +378,7 @@ class CarlaSyncContext:
         new_settings = self.world.get_settings()
         new_settings.synchronous_mode = True
         new_settings.fixed_delta_seconds = 1.0 / self.fps
-        new_settings.no_rendering_mode = False
+        new_settings.no_rendering_mode = self.no_rendering_mode
         self.world.apply_settings(new_settings)
         self.tm.set_synchronous_mode(True)
         return self
@@ -361,6 +387,14 @@ class CarlaSyncContext:
         return self.world.tick()
 
     def __exit__(self, exc_type, exc, tb) -> None:
+        if self.no_rendering_mode:
+            # Do not toggle CARLA world/TM settings at trajectory-only attempt
+            # boundaries. On this packaged CARLA build, even restoring to
+            # async no_rendering settings can make a just-finished server exit
+            # before actor cleanup on some adapters. The next attempt
+            # re-applies the same synchronous no_rendering settings on entry;
+            # the supervisor terminates the server when collection ends.
+            return
         self.tm.set_synchronous_mode(False)
         if self._old_settings is not None:
             self.world.apply_settings(self._old_settings)
@@ -762,6 +796,11 @@ def build_junction_scene(world_map: carla.Map, grp: Optional[object], args: argp
             "No valid junction scene found. Try increasing --support-size, lowering --route-approach/--route-exit, "
             "or using --scene-mode corridor."
         )
+    if args.scene_junction_id is not None:
+        for _, candidate in candidates:
+            if int(candidate.info.get("junction_id", -1)) == int(args.scene_junction_id):
+                return candidate
+        raise RuntimeError(f"Requested scene junction id is not available: {args.scene_junction_id}")
     candidates.sort(key=lambda item: item[0], reverse=True)
     return candidates[0][1]
 
@@ -819,6 +858,7 @@ def build_corridor_scene(world_map: carla.Map, grp: Optional[object], args: argp
                     valid_crop=valid_crop,
                     routes=[route],
                     info={
+                        "candidate_index": int(idx),
                         "road_id": int(wp0.road_id),
                         "lane_id": int(wp0.lane_id),
                         "center": loc_to_dict(center),
@@ -830,6 +870,11 @@ def build_corridor_scene(world_map: carla.Map, grp: Optional[object], args: argp
 
     if not candidates:
         raise RuntimeError("No valid corridor scene found. Try increasing --support-size or changing towns.")
+    if args.scene_corridor_index is not None:
+        for _, candidate in candidates:
+            if int(candidate.info.get("candidate_index", -1)) == int(args.scene_corridor_index):
+                return candidate
+        raise RuntimeError(f"Requested scene corridor index is not available: {args.scene_corridor_index}")
     candidates.sort(key=lambda item: item[0], reverse=True)
     return candidates[0][1]
 
@@ -1045,8 +1090,8 @@ def configure_autopilot_for_route(
         traffic_manager.ignore_lights_percentage(actor, 100.0)
 
 
-def hold_vehicle_until_release(actor: carla.Actor) -> None:
-    actor.set_autopilot(False)
+def hold_vehicle_until_release(actor: carla.Actor, traffic_manager: carla.TrafficManager) -> None:
+    actor.set_autopilot(False, traffic_manager.get_port())
     actor.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0, hand_brake=True))
 
 
@@ -1147,7 +1192,7 @@ def spawn_target_vehicles(
         speed_diff = float(plan_row.get("speed_diff", args.target_speed_diff))
         release_frame = int(round(start_delay_s * float(args.fps)))
         if traffic_plan is not None:
-            hold_vehicle_until_release(actor)
+            hold_vehicle_until_release(actor, traffic_manager)
         else:
             configure_autopilot_for_route(actor, traffic_manager, route, speed_diff, bool(args.target_ignore_lights))
         actors.append(actor)
@@ -1231,11 +1276,11 @@ def spawn_background_vehicles(
     rng.shuffle(spawn_points)
     actors: List[carla.Actor] = []
     failures: List[Dict[str, object]] = []
+    requested_types = [str(item) for item in policy.get("vehicle_types", []) if str(item).strip()]
+    exact_type_list = str(policy.get("vehicle_type_policy", "")) in {"exact_ordered_list", "exact_list"}
     for sp in spawn_points:
         if len(actors) >= requested_count:
             break
-        requested_types = [str(item) for item in policy.get("vehicle_types", []) if str(item).strip()]
-        exact_type_list = str(policy.get("vehicle_type_policy", "")) in {"exact_ordered_list", "exact_list"}
         if exact_type_list and len(actors) < len(requested_types):
             blueprint_id = requested_types[len(actors)]
         else:
@@ -1491,7 +1536,63 @@ def destroy_actors(client: carla.Client, actors: Iterable[carla.Actor]) -> None:
         if actor_id is not None:
             actor_ids.append(int(actor_id))
     if actor_ids:
-        client.apply_batch_sync([carla.command.DestroyActor(actor_id) for actor_id in sorted(set(actor_ids))], True)
+        commands = [carla.command.DestroyActor(actor_id) for actor_id in sorted(set(actor_ids))]
+        try:
+            # Do not request an implicit world tick here. In multi-worker
+            # no-rendering collection, several post-clip CARLA crashes were
+            # isolated to the cleanup stage after complete actor_states had
+            # already been written. A synchronous destroy response is useful,
+            # but an extra tick during teardown is unnecessary and can trip
+            # RenderThread/UE4 shutdown races.
+            client.apply_batch_sync(commands, False)
+        except RuntimeError as exc:
+            print(f"[WARN] Failed to destroy {len(commands)} CARLA actors during cleanup: {exc}")
+
+
+def carla_port_accepts(host: str, port: int, timeout_s: float = 0.25) -> bool:
+    try:
+        with socket.create_connection((str(host), int(port)), timeout=float(timeout_s)):
+            return True
+    except OSError:
+        return False
+
+
+def build_validation_report(
+    args: argparse.Namespace,
+    scene_meta: Dict[str, object],
+    initial_role_counts: Dict[str, int],
+    target_validation: Dict[int, Dict[str, object]],
+) -> Dict[str, object]:
+    validation_report: Dict[str, object] = {
+        "min_passed_targets_required": args.min_passed_targets,
+        "min_frames_after_core_required": int(args.min_frames_after_core),
+        "core_exit_buffer_m": float(args.core_exit_buffer_m),
+        "min_target_displacement_m": float(args.min_target_displacement_m),
+        "passed_target_count": 0,
+        "valid_clip": False,
+        "targets": {},
+        "vehicle_role_counts": scene_meta.get("vehicle_role_counts", initial_role_counts),
+        "background_tm": scene_meta.get("background_spawn_report", {}),
+        "support_valid_check": {
+            "support_size_m": args.support_size,
+            "valid_size_m": args.valid_size,
+            "edge_buffer_m_each_side": (args.support_size - args.valid_size) / 2.0,
+            "support_larger_than_valid": args.support_size > args.valid_size,
+        },
+    }
+    targets = validation_report["targets"]
+    assert isinstance(targets, dict)
+    for actor_id, state in target_validation.items():
+        state["passed"] = is_target_passed(
+            state,
+            min_frames_after_core=args.min_frames_after_core,
+            min_target_displacement_m=args.min_target_displacement_m,
+        )
+        if state["passed"]:
+            validation_report["passed_target_count"] = int(validation_report["passed_target_count"]) + 1
+        targets[str(actor_id)] = state
+    validation_report["valid_clip"] = int(validation_report["passed_target_count"]) >= args.min_passed_targets
+    return validation_report
 
 
 def vertical_settling_stats(history: Dict[int, List[Tuple[float, float]]], window: int) -> Dict[str, object]:
@@ -1591,13 +1692,21 @@ def clear_existing_sensors(client: carla.Client, world: carla.World) -> int:
 def main() -> int:
     _configure_line_buffering()
     args = parse_args()
+    if args.no_rendering_mode and not args.no_video:
+        raise ValueError("--no-rendering-mode requires --no-video; RGB camera output needs CARLA rendering.")
     rng = random.Random(args.seed)
 
     out_dir = Path(args.output_dir)
     frames_dir = out_dir / "frames" / "topdown_rgb"
     ensure_empty_dir(out_dir, args.keep_existing)
     ensure_empty_dir(frames_dir, args.keep_existing)
-    write_stage(out_dir, "initialized", no_video=bool(args.no_video), output_dir=str(out_dir))
+    write_stage(
+        out_dir,
+        "initialized",
+        no_video=bool(args.no_video),
+        no_rendering_mode=bool(args.no_rendering_mode),
+        output_dir=str(out_dir),
+    )
 
     client = carla.Client(args.host, args.port)
     client.set_timeout(30.0)
@@ -1611,8 +1720,8 @@ def main() -> int:
             print(f"[INFO] Reusing loaded town: {current_town}")
             write_stage(out_dir, "world_ready", town=current_town, loaded=False)
         else:
-            print(f"[INFO] Loading town: {requested_town} (current={current_town})")
-            write_stage(out_dir, "load_world", requested_town=requested_town, current_town=current_town)
+            print(f"[INFO] Loading town: {requested_town} (current={current_town}, reason=town_changed)")
+            write_stage(out_dir, "load_world", requested_town=requested_town, current_town=current_town, reason="town_changed")
             world = client.load_world(requested_town)
             time.sleep(3.0)
             write_stage(out_dir, "world_ready", town=requested_town, loaded=True)
@@ -1633,7 +1742,11 @@ def main() -> int:
         f"valid={args.valid_size:.1f}m support={args.support_size:.1f}m routes={len(scene.routes)}"
     )
 
-    traffic_manager = client.get_trafficmanager()
+    traffic_manager = (
+        client.get_trafficmanager(int(args.traffic_manager_port))
+        if args.traffic_manager_port is not None
+        else client.get_trafficmanager()
+    )
     traffic_manager.set_random_device_seed(args.seed)
     traffic_manager.set_global_distance_to_leading_vehicle(2.5)
     traffic_manager.global_percentage_speed_difference(0.0)
@@ -1663,6 +1776,7 @@ def main() -> int:
         "schema": "dynamic_radio_scene_carla_v1",
         "host": args.host,
         "port": args.port,
+        "traffic_manager_port": args.traffic_manager_port,
         "town": world_map.name,
         "seed": args.seed,
         "frames_requested": args.frames,
@@ -1670,6 +1784,8 @@ def main() -> int:
         "fixed_delta_seconds": 1.0 / args.fps,
         "traffic_preroll_s": float(args.traffic_preroll_s),
         "traffic_preroll_frames": int(round(max(0.0, float(args.traffic_preroll_s)) * float(args.fps))),
+        "scene_id": str(args.scene_id) if str(args.scene_id).strip() else None,
+        "scene_type": str(args.scene_type) if str(args.scene_type).strip() else None,
         "scene_mode": scene.mode,
         "scene_info": scene.info,
         "support_region": scene.support_region.to_dict(),
@@ -1733,8 +1849,17 @@ def main() -> int:
     save_json(out_dir / "routes.json", {"routes": [route.to_dict(compact=False) for route in scene.routes]})
     write_stage(out_dir, "scene_selected", route_count=len(scene.routes))
 
+    target_validation: Dict[int, Dict[str, object]] = {}
+    validation_report: Optional[Dict[str, object]] = None
+    recording_completed = False
+
     try:
-        with CarlaSyncContext(world, traffic_manager, args.fps) as sync:
+        with CarlaSyncContext(
+            world,
+            traffic_manager,
+            args.fps,
+            no_rendering_mode=bool(args.no_rendering_mode),
+        ) as sync:
             write_stage(out_dir, "spawn_actors_started", vehicle_count=len(traffic_plan_vehicle_rows))
             targets, target_routes, target_plan_rows, controlled_spawn_report = spawn_target_vehicles(
                 client, world, traffic_manager, scene, args, rng, vehicle_blueprints
@@ -1828,7 +1953,6 @@ def main() -> int:
                 topdown_video_path = out_dir / "topdown_raw.avi"
                 avi_writer = RawAviWriter(topdown_video_path, args.image_width, args.image_height, args.fps)
 
-            target_validation: Dict[int, Dict[str, object]] = {}
             for actor in targets:
                 route = target_routes[int(actor.id)]
                 target_validation[int(actor.id)] = {
@@ -1855,7 +1979,8 @@ def main() -> int:
             write_stage(out_dir, "recording_started", frames=int(args.frames), camera_enabled=bool(camera is not None))
             with tracks_path.open("w", encoding="utf-8") as tracks_f:
                 for frame_index in range(args.frames):
-                    draw_scene_debug(world, scene, args)
+                    if not args.no_rendering_mode:
+                        draw_scene_debug(world, scene, args)
                     release_due_target_vehicles(
                         traffic_preroll_frames + frame_index,
                         traffic_manager,
@@ -1922,8 +2047,19 @@ def main() -> int:
                             f"actors={len(actors)} targets_passed={passed_so_far}"
                         )
             write_stage(out_dir, "recording_completed", frames=int(args.frames))
+            recording_completed = True
 
     finally:
+        if recording_completed and target_validation and validation_report is None:
+            validation_report = build_validation_report(args, scene_meta, initial_role_counts, target_validation)
+            save_json(out_dir / "validation_report.json", validation_report)
+            write_stage(
+                out_dir,
+                "validation_written",
+                valid_clip=bool(validation_report["valid_clip"]),
+                passed_target_count=int(validation_report["passed_target_count"]),
+                cleanup_pending=True,
+            )
         write_stage(out_dir, "cleanup_started", actor_count=len(actors_to_destroy), camera_present=bool(camera is not None))
         if avi_writer is not None:
             avi_writer.close()
@@ -1932,43 +2068,25 @@ def main() -> int:
                 camera.stop()
             except RuntimeError:
                 pass
-        destroy_actors(client, actors_to_destroy)
-        write_stage(out_dir, "cleanup_completed")
+        if actors_to_destroy and not carla_port_accepts(args.host, args.port):
+            print(
+                "[WARN] CARLA server is unavailable during cleanup; "
+                "skipping actor destruction and letting the supervisor restart the server."
+            )
+            write_stage(out_dir, "cleanup_skipped_server_unavailable", actor_count=len(actors_to_destroy))
+        else:
+            destroy_actors(client, actors_to_destroy)
+            write_stage(out_dir, "cleanup_completed", actor_count=len(actors_to_destroy))
 
-    validation_report = {
-        "min_passed_targets_required": args.min_passed_targets,
-        "min_frames_after_core_required": int(args.min_frames_after_core),
-        "core_exit_buffer_m": float(args.core_exit_buffer_m),
-        "min_target_displacement_m": float(args.min_target_displacement_m),
-        "passed_target_count": 0,
-        "valid_clip": False,
-        "targets": {},
-        "vehicle_role_counts": scene_meta.get("vehicle_role_counts", initial_role_counts),
-        "background_tm": scene_meta.get("background_spawn_report", {}),
-        "support_valid_check": {
-            "support_size_m": args.support_size,
-            "valid_size_m": args.valid_size,
-            "edge_buffer_m_each_side": (args.support_size - args.valid_size) / 2.0,
-            "support_larger_than_valid": args.support_size > args.valid_size,
-        },
-    }
-    for actor_id, state in target_validation.items():
-        state["passed"] = is_target_passed(
-            state,
-            min_frames_after_core=args.min_frames_after_core,
-            min_target_displacement_m=args.min_target_displacement_m,
+    if validation_report is None:
+        validation_report = build_validation_report(args, scene_meta, initial_role_counts, target_validation)
+        save_json(out_dir / "validation_report.json", validation_report)
+        write_stage(
+            out_dir,
+            "validation_written",
+            valid_clip=bool(validation_report["valid_clip"]),
+            passed_target_count=int(validation_report["passed_target_count"]),
         )
-        if state["passed"]:
-            validation_report["passed_target_count"] += 1
-        validation_report["targets"][str(actor_id)] = state
-    validation_report["valid_clip"] = validation_report["passed_target_count"] >= args.min_passed_targets
-    save_json(out_dir / "validation_report.json", validation_report)
-    write_stage(
-        out_dir,
-        "validation_written",
-        valid_clip=bool(validation_report["valid_clip"]),
-        passed_target_count=int(validation_report["passed_target_count"]),
-    )
 
     if not args.no_video and find_ffmpeg_exe() is not None:
         mp4_path = out_dir / "topdown.mp4"
