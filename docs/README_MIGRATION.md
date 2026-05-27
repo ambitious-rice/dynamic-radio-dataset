@@ -113,6 +113,68 @@ from CARLA instead of reusing the reference Sionna export, add
 `--no-reference-export` during export. In that mode, the target server must be
 able to run the scene preparation/export path before RF cache generation.
 
+## Target Codex Handoff Prompt
+
+Use this prompt for Codex on the target server:
+
+```text
+你现在接手一个 CARLA + Sionna RT 动态 radio-map 数据集项目。代码仓库是：
+git@github.com:ambitious-rice/dynamic-radio-dataset.git
+优先使用分支 dynamic-radio-migration-sionna2。
+
+核心目标：
+1. 不重新跑 CARLA 轨迹采集。
+2. 复用源服务器已经导出的 CARLA-only state：轨迹、episode plans、trajectory QA、TX catalog、TX assignment、scene signature、reference scene/static building proxy。
+3. 在当前服务器上重新跑 Sionna RT 2.x 的 static RF cache 和 dynamic RF。
+
+先执行：
+cd /path/to/carla
+git clone --branch dynamic-radio-migration-sionna2 git@github.com:ambitious-rice/dynamic-radio-dataset.git .
+或者如果 SSH 不可用，使用 HTTPS clone。
+
+读这些文件：
+AGENTS.md
+.agent/HANDOFF.md
+.agent/DATASET_PIPELINE.md
+docs/README_MIGRATION.md
+
+安装环境：
+conda env create -f envs/dynamic-radio-orchestrator.yaml
+conda env create -f envs/sionna-rt-2x.yaml
+export DRD_SIONNA_PYTHON=/path/to/miniconda3/envs/sionna-rt-2x/bin/python
+
+导入 CARLA-only state：
+如果拿到的是 carla_state/MultiScene20.tar.gz：
+PYTHONPATH=scripts python3 scripts/drd.py import-carla-state \
+  --source carla_state/MultiScene20.tar.gz \
+  --destination-root .
+
+如果拿到的是分卷：
+cat carla_state/MultiScene20.tar.gz.part-* > carla_state/MultiScene20.tar.gz
+PYTHONPATH=scripts python3 scripts/drd.py import-carla-state \
+  --source carla_state/MultiScene20.tar.gz \
+  --destination-root .
+
+导入后检查：
+PYTHONPATH=scripts python3 -m py_compile $(find scripts/dynamic_radio_dataset -name "*.py")
+PYTHONPATH=scripts python3 -m dynamic_radio_dataset.checks.check_contract --repo-root .
+python3 scripts/drd.py --help
+
+然后重新跑 RF：
+python3 scripts/drd.py prepare-rf-cache \
+  --config configs/dynamic_radio/multi_scene_20x150_resolved.yaml --force
+python3 scripts/drd.py process-multi-scene-rf \
+  --config configs/dynamic_radio/multi_scene_20x150_resolved.yaml \
+  --use-gpu --gpu-ids 0 --rf-workers 1
+
+注意：
+- 不要运行 collect-multi-scene，除非明确要求重新采集 CARLA。
+- 不要把旧的 dynamic RSS、static RSS cache、per-TX rss_maps.npz 当作新结果复用。
+- episode 级 sionna_export 应该由新服务器根据轨迹重新导出。
+- 大型车辆 fusorosa 的 sealed-underbody 遮挡在当前 exporter 里实现，重新导出 episode sionna_export 时会生效。
+- 如果 GitHub 数据分支不可用，就让用户手动传 carla_state/MultiScene20.tar.gz 或分卷包。
+```
+
 If this workspace is not already connected to a GitHub remote, create a private
 GitHub repository first and add it:
 

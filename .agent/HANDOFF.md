@@ -60,6 +60,15 @@ code branch. Use a separate GitHub data branch such as
 limit, split it with `split -b 90M` and reconstruct with `cat` on the target.
 `docs/README_MIGRATION.md` contains the exact commands.
 
+Follow-up: added a "Target Codex Handoff Prompt" section to
+`docs/README_MIGRATION.md`. It tells the target-server Codex to clone
+`dynamic-radio-migration-sionna2`, read the project handoff docs, import the
+CARLA-only state archive or split parts, avoid `collect-multi-scene`, and rerun
+only `prepare-rf-cache` plus `process-multi-scene-rf` with Sionna RT 2.x. It
+also states that old dynamic/static RF outputs must not be reused and that the
+fusorosa sealed-underbody geometry is applied when episode Sionna exports are
+regenerated.
+
 Validation passed after this change:
 
 ```text
